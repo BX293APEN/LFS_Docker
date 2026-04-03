@@ -33,7 +33,7 @@ OUTPUT_TAR="/${WS}/lfs-rootfs.tar.gz"
 FLAG_DIR="/${WS}/FLAGS"
 DONE_FLAG="${FLAG_DIR}/.build_done"
 
-WGETLIST_URL="${LFS_MIRROR}/${LFS_VERSION}/wget-list-sysv"
+WGETLIST_URL="${LFS_MIRROR}/${LFS_VERSION}/wget-list-systemd"
 MD5SUMS_URL="${LFS_MIRROR}/${LFS_VERSION}/md5sums"
 
 echo "============================================"
