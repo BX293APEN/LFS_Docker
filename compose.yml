@@ -1,5 +1,5 @@
 # docker compose up --build -d  で寝る前に起動
-# docker logs -f Docker_LFS     で進捗確認
+# docker logs -f Docker_BLFS     で進捗確認
 # docker compose down           でコンテナ削除
 
 services:
@@ -39,6 +39,7 @@ services:
       - TZ=${TIME_ZONE}
       - LOCALE=${LOCALE}
       - LANG=${LANG}
+      - BLFS_MIRROR=${BLFS_MIRROR}
       - ROOT_PASSWORD=${ROOT_PASSWORD}
 
     command:
