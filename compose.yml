@@ -1,0 +1,45 @@
+# docker compose up --build -d  で寝る前に起動
+# docker logs -f Docker_LFS     で進捗確認
+# docker compose down           でコンテナ削除
+
+services:
+  linux:
+    env_file: .env
+    cpus: ${CPU_CORE}
+
+    container_name: ${CONTAINER_NAME}
+    hostname: ${CONTAINER_NAME}
+
+    build:
+      context: ${Dockerfile_DIR}
+      dockerfile: ${Dockerfile}
+      args:
+        WS:          ${WS}
+        ENTRY_DIR:   ${ENTRY_DIR}
+        ENTRY_POINT: ${ENTRY_POINT}
+        LANG:        ${LANG}
+
+    volumes:
+      - ${VOLUME}:/${WS}   # ホスト ./build → コンテナ内 /build
+
+    privileged: true        # mount / chroot に必須
+    pid: host               # カーネル操作に必要
+
+    restart: no             # ビルド完了後に自動再起動しない
+
+    stop_grace_period: 12h  # 長時間ビルドを途中で止めない
+
+    environment:
+      - LFS_VERSION=${LFS_VERSION}
+      - LFS_ARCH=${LFS_ARCH}
+      - LFS_TGT=${LFS_TGT}
+      - LFS_MIRROR=${LFS_MIRROR}
+      - CPU_CORE=${CPU_CORE}
+      - WS=${WS}
+      - TZ=${TIME_ZONE}
+      - LOCALE=${LOCALE}
+      - LANG=${LANG}
+      - ROOT_PASSWORD=${ROOT_PASSWORD}
+
+    command:
+      - /${ENTRY_DIR}/${ENTRY_POINT}
