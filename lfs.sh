@@ -22,6 +22,10 @@ LFS_VERSION="${LFS_VERSION:-12.2}"
 LFS_ARCH="${LFS_ARCH:-x86_64}"
 LFS_TGT="${LFS_TGT:-x86_64-lfs-linux-gnu}"
 
+# GNU パッケージミラー（.env で上書き可能）
+GNU_MIRROR="${GNU_MIRROR:-https://ftpmirror.gnu.org}"
+GCC_INFRA_MIRROR="${GCC_INFRA_MIRROR:-https://gcc.gnu.org/pub/gcc/infrastructure}"
+
 # ミラーフォールバックリスト（順番に試す）
 LFS_MIRRORS=(
     "${LFS_MIRROR:-https://www.linuxfromscratch.org/lfs/downloads}"
@@ -193,6 +197,56 @@ if ! flagged step2_sources; then
             echo "$FAILED"
         fi
     fi
+    # ── GCC 依存ライブラリ（mpfr / gmp / mpc）の確実な取得 ──────────────────
+    # ftp.gnu.org は低速・不安定なため、wget-list で取得できなかった場合に
+    # GNU_MIRROR / GCC_INFRA_MIRROR からフォールバック取得する
+    log_info "GCC 依存ライブラリ（mpfr/gmp/mpc）の確認..."
+
+    # パッケージ名・バージョン・拡張子の定義
+    # 書式: "pkgname version ext"
+    GCC_DEPS=(
+        "mpfr 4.2.1 tar.xz"
+        "gmp  6.3.0 tar.xz"
+        "mpc  1.3.1 tar.gz"
+    )
+
+    for dep_info in "${GCC_DEPS[@]}"; do
+        dep_name=$(echo "${dep_info}" | awk '{print $1}')
+        dep_ver=$( echo "${dep_info}" | awk '{print $2}')
+        dep_ext=$( echo "${dep_info}" | awk '{print $3}')
+        dep_file="${dep_name}-${dep_ver}.${dep_ext}"
+
+        if [[ -f "${dep_file}" ]]; then
+            log_info "  [OK] ${dep_file} は取得済み"
+            continue
+        fi
+
+        log_info "  [DL] ${dep_file} を取得します..."
+
+        # 試行1: GNU_MIRROR
+        wget -q --timeout=60 --tries=2 \
+            "${GNU_MIRROR}/${dep_name}/${dep_file}" \
+            -O "${dep_file}" 2>/dev/null && \
+            { log_info "  [OK] ${GNU_MIRROR} から取得"; continue; } || rm -f "${dep_file}"
+
+        # 試行2: GCC_INFRA_MIRROR
+        wget -q --timeout=60 --tries=2 \
+            "${GCC_INFRA_MIRROR}/${dep_file}" \
+            -O "${dep_file}" 2>/dev/null && \
+            { log_info "  [OK] ${GCC_INFRA_MIRROR} から取得"; continue; } || rm -f "${dep_file}"
+
+        # 試行3: ftp.gnu.org 直接
+        wget -q --timeout=120 --tries=2 \
+            "https://ftp.gnu.org/gnu/${dep_name}/${dep_file}" \
+            -O "${dep_file}" 2>/dev/null && \
+            { log_info "  [OK] ftp.gnu.org から取得"; continue; } || rm -f "${dep_file}"
+
+        echo "[ERROR] ${dep_file} の取得に失敗しました。"
+        echo "        .env の GNU_MIRROR または GCC_INFRA_MIRROR を変更してください。"
+        exit 1
+    done
+    log_info "GCC 依存ライブラリ 取得完了"
+
     done_flag step2_sources
     log_info "Step2 完了"
 else
