@@ -191,6 +191,11 @@ fi
 if ! flagged step3_toolchain; then
     log_step "Step3: クロスツールチェーン ビルド"
 
+    # lfs ホームディレクトリが確実に存在するよう保証
+    mkdir -p /home/lfs
+    chown lfs:lfs /home/lfs
+    chmod 700 /home/lfs
+
     cat > /home/lfs/.bashrc << LFSRC
 set +h
 umask 022
@@ -204,10 +209,26 @@ export MAKEFLAGS="-j${CPU_CORE}"
 LFSRC
     chown lfs:lfs /home/lfs/.bashrc
 
-    cat > /tmp/build-toolchain.sh << 'TCEOF'
+    # .bashrc の展開結果をログに出力して確認
+    log_info "[DEBUG] /home/lfs/.bashrc の内容:"
+    cat /home/lfs/.bashrc
+
+    # build-toolchain.sh を lfs がアクセスできる場所に配置
+    mkdir -p /home/lfs
+    cat > /home/lfs/build-toolchain.sh << 'TCEOF'
 #!/bin/bash
 set -eo pipefail
 source ~/.bashrc
+
+# ── 環境変数の検証 ─────────────────────────────────────────
+echo "[DEBUG] LFS       = ${LFS}"
+echo "[DEBUG] LFS_TGT   = ${LFS_TGT}"
+echo "[DEBUG] PATH      = ${PATH}"
+echo "[DEBUG] MAKEFLAGS = ${MAKEFLAGS}"
+
+[[ -z "${LFS}" ]]        && { echo "[ERROR] LFS が未定義です。.bashrc の展開を確認してください。"; exit 1; }
+[[ -d "${LFS}/sources" ]] || { echo "[ERROR] ${LFS}/sources が存在しません。Step2 を確認してください。"; exit 1; }
+[[ -d "${LFS}/tools" ]]   || { echo "[ERROR] ${LFS}/tools が存在しません。Step1 を確認してください。"; exit 1; }
 
 pkg_build() {
     local name="$1" tarball="$2" fn="$3"
@@ -287,10 +308,15 @@ pkg_build "Libstdc++"         "$(ls ${LFS}/sources/gcc-*.tar.*)"       do_libstd
 
 echo "[TC] クロスツールチェーン完了"
 TCEOF
-    chmod +x /tmp/build-toolchain.sh
+    chown lfs:lfs /home/lfs/build-toolchain.sh
+    chmod +x /home/lfs/build-toolchain.sh
+
     # ログをファイルに書きつつ docker logs でも見えるようにする
-    su - lfs -c "bash /tmp/build-toolchain.sh" 2>&1 | tee "/${WS}/toolchain.log" ; true
-    [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "[ERROR] Step3 クロスツールチェーン失敗。toolchain.log を確認してください。"; exit 1; }
+    # 注意: su - は新しいシェルを起動するため PIPESTATUS を正しく取るには
+    #       サブシェル内の終了コードを明示的に取り出す必要がある
+    su - lfs -c "bash ~/build-toolchain.sh" 2>&1 | tee "/${WS}/toolchain.log"
+    TC_EXIT=${PIPESTATUS[0]}
+    [[ ${TC_EXIT} -eq 0 ]] || { echo "[ERROR] Step3 クロスツールチェーン失敗 (exit=${TC_EXIT})。/${WS}/toolchain.log を確認してください。"; exit 1; }
     done_flag step3_toolchain
     log_info "Step3 完了"
 else
