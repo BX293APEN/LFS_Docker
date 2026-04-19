@@ -25,7 +25,7 @@ LFS_TGT="${LFS_TGT:-x86_64-lfs-linux-gnu}"
 # ── ミラーリスト（.env のスペース区切り文字列 → bash 配列に変換）────────────
 # .env で未設定の場合のデフォルト値も兼ねる
 read -ra LFS_MIRRORS     <<< "${LFS_MIRRORS:-https://ftp.osuosl.org/pub/lfs/lfs-packages/${LFS_VERSION} https://www.linuxfromscratch.org/lfs/downloads https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/${LFS_VERSION}}"
-read -ra GNU_MIRRORS     <<< "${GNU_MIRRORS:-https://ftpmirror.gnu.org https://ftp.jaist.ac.jp/pub/GNU https://ftp.iij.ad.jp/pub/gnu https://ftp.gnu.org/gnu}"
+read -ra GNU_MIRRORS     <<< "${GNU_MIRRORS:-https://ftpmirror.gnu.org https://ftp.jaist.ac.jp/pub/GNU https://ftp.iij.ad.jp/pub/gnu https://mirrors.kernel.org/gnu https://ftp.gnu.org/gnu}"
 read -ra GCC_INFRA_MIRRORS <<< "${GCC_INFRA_MIRRORS:-https://gcc.gnu.org/pub/gcc/infrastructure}"
 
 DL_RETRIES="${DL_RETRIES:-3}"
@@ -226,7 +226,18 @@ if ! flagged step2_sources; then
     while IFS= read -r pkg_url || [[ -n "${pkg_url}" ]]; do
         [[ -z "${pkg_url}" || "${pkg_url}" =~ ^# ]] && continue
         pkg_file=$(basename "${pkg_url}")
-        smart_wget "${pkg_file}" "${pkg_url}" || (( dl_fail_count++ )) || true
+        # ftp.gnu.org は到達不可の場合があるため GNU_MIRRORS でフォールバック
+        if [[ "${pkg_url}" == *"ftp.gnu.org/gnu/"* ]]; then
+            gnu_subpath="${pkg_url#*ftp.gnu.org/gnu/}"   # 例: bash/bash-5.2.32.tar.gz
+            gnu_subdir="${gnu_subpath%%/*}"               # 例: bash
+            # GNU_MIRRORS + GCC_INFRA_MIRRORS の全URLリストを構築
+            fallback_urls=()
+            for m in "${GNU_MIRRORS[@]}"; do fallback_urls+=("${m}/${gnu_subpath}"); done
+            for m in "${GCC_INFRA_MIRRORS[@]}"; do fallback_urls+=("${m}/${pkg_file}"); done
+            smart_wget "${pkg_file}" "${fallback_urls[@]}" || (( dl_fail_count++ )) || true
+        else
+            smart_wget "${pkg_file}" "${pkg_url}" || (( dl_fail_count++ )) || true
+        fi
     done < wget-list
     log_info "一括ダウンロード完了（失敗: ${dl_fail_count} 件）"
 
@@ -247,9 +258,9 @@ if ! flagged step2_sources; then
 
     # ── expat フォールバック（wget-list に無いバージョンの場合）──────────────
     if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
-        log_info "expat-2.6.2.tar.xz を GitHub から取得..."
-        smart_wget "expat-2.6.2.tar.xz" \
-            "https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz" || true
+        log_info "expat-2.6.2.tar.xz を取得中..."
+        read -ra _URL_EXPAT_S2 <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
+        smart_wget "expat-2.6.2.tar.xz" "${_URL_EXPAT_S2[@]}" || true
     fi
 
     # ── 失敗フラグの集計・報告 ──────────────────────────────────────────────
@@ -1313,56 +1324,62 @@ if ! flagged step5_cli_sources; then
     mkdir -p "${LFS}/sources"
     cd "${LFS}/sources"
 
-    CLI_PKGS=(
-        # ── sudo ──────────────────────────────────────────────
-        "https://www.sudo.ws/dist/sudo-1.9.15p5.tar.gz"
-        # ── nano ──────────────────────────────────────────────
-        "https://www.nano-editor.org/dist/v8/nano-8.3.tar.xz"
-        # ── git 依存: curl, expat (LFSに含まれる), pcre2 ─────
-        "https://curl.se/download/curl-8.11.1.tar.xz"
-        "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2"
-        # ── git ───────────────────────────────────────────────
-        "https://www.kernel.org/pub/software/scm/git/git-2.47.2.tar.xz"
-        # ── htop ──────────────────────────────────────────────
-        "https://github.com/htop-dev/htop/releases/download/3.3.0/htop-3.3.0.tar.xz"
-        # ── tmux 依存: libevent ───────────────────────────────
-        "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
-        # ── tmux ──────────────────────────────────────────────
-        "https://github.com/tmux/tmux/releases/download/3.5a/tmux-3.5a.tar.gz"
-        # ── tree ──────────────────────────────────────────────
-        "https://mama.indstate.edu/users/ice/tree/src/tree-2.1.3.tgz"
-        # ── bash-completion ───────────────────────────────────
-        "https://github.com/scop/bash-completion/releases/download/2.14.0/bash-completion-2.14.0.tar.xz"
-        # ── D-Bus (sudo/polkit に必要) ─────────────────────────
-        "https://dbus.freedesktop.org/releases/dbus/dbus-1.15.8.tar.xz"
-        # ── iproute2 (ip コマンド) ─────────────────────────────
-        "https://www.kernel.org/pub/linux/utils/net/iproute2/iproute2-6.12.0.tar.xz"
-        # ── dhcpcd (ネットワーク設定) ──────────────────────────
-        "https://github.com/NetworkConfiguration/dhcpcd/releases/download/v10.0.10/dhcpcd-10.0.10.tar.xz"
-        # ── openssh ───────────────────────────────────────────
-        "https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.9p1.tar.gz"
-        # ── libgpg-error / libgcrypt (openssh 依存) ───────────
-        "https://www.gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.50.tar.bz2"
-        "https://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.11.0.tar.bz2"
-        # ── GRUB (ブートローダー) ──────────────────────────────
-        "https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz"
-        # ── Linux kernel ──────────────────────────────────────
-        # ※ LFS Step2 で linux-*.tar.xz はすでに取得済みなので不要
-    )
+    # ── CLI パッケージURL定義（.env の CLI_URL_* で上書き可能）──────────────
+    # 各変数はスペース区切りで複数URL指定可。左から順に試してフォールバックします。
+    read -ra _URL_SUDO          <<< "${CLI_URL_SUDO:-https://www.sudo.ws/dist/sudo-1.9.15p5.tar.gz}"
+    read -ra _URL_NANO          <<< "${CLI_URL_NANO:-https://www.nano-editor.org/dist/v8/nano-8.3.tar.xz}"
+    read -ra _URL_CURL          <<< "${CLI_URL_CURL:-https://curl.se/download/curl-8.11.1.tar.xz https://github.com/curl/curl/releases/download/curl-8_11_1/curl-8.11.1.tar.xz}"
+    read -ra _URL_PCRE2         <<< "${CLI_URL_PCRE2:-https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2 https://sourceforge.net/projects/pcre/files/pcre2/10.44/pcre2-10.44.tar.bz2}"
+    read -ra _URL_GIT           <<< "${CLI_URL_GIT:-https://www.kernel.org/pub/software/scm/git/git-2.47.2.tar.xz https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.47.2.tar.xz}"
+    read -ra _URL_HTOP          <<< "${CLI_URL_HTOP:-https://github.com/htop-dev/htop/releases/download/3.3.0/htop-3.3.0.tar.xz}"
+    read -ra _URL_LIBEVENT      <<< "${CLI_URL_LIBEVENT:-https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz}"
+    read -ra _URL_TMUX          <<< "${CLI_URL_TMUX:-https://github.com/tmux/tmux/releases/download/3.5a/tmux-3.5a.tar.gz}"
+    read -ra _URL_TREE          <<< "${CLI_URL_TREE:-https://mama.indstate.edu/users/ice/tree/src/tree-2.1.3.tgz https://gitlab.com/OldManProgrammer/unix-tree/-/archive/2.1.3/unix-tree-2.1.3.tar.gz}"
+    read -ra _URL_BASH_COMPLETION <<< "${CLI_URL_BASH_COMPLETION:-https://github.com/scop/bash-completion/releases/download/2.14.0/bash-completion-2.14.0.tar.xz}"
+    read -ra _URL_DBUS          <<< "${CLI_URL_DBUS:-https://dbus.freedesktop.org/releases/dbus/dbus-1.15.8.tar.xz}"
+    read -ra _URL_IPROUTE2      <<< "${CLI_URL_IPROUTE2:-https://www.kernel.org/pub/linux/utils/net/iproute2/iproute2-6.12.0.tar.xz https://mirrors.edge.kernel.org/pub/linux/utils/net/iproute2/iproute2-6.12.0.tar.xz}"
+    read -ra _URL_DHCPCD        <<< "${CLI_URL_DHCPCD:-https://github.com/NetworkConfiguration/dhcpcd/releases/download/v10.0.10/dhcpcd-10.0.10.tar.xz}"
+    read -ra _URL_OPENSSH       <<< "${CLI_URL_OPENSSH:-https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.9p1.tar.gz https://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.9p1.tar.gz}"
+    read -ra _URL_LIBGPG_ERROR  <<< "${CLI_URL_LIBGPG_ERROR:-https://www.gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.50.tar.bz2 https://mirrors.dotsrc.org/gcrypt/libgpg-error/libgpg-error-1.50.tar.bz2}"
+    read -ra _URL_LIBGCRYPT     <<< "${CLI_URL_LIBGCRYPT:-https://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.11.0.tar.bz2 https://mirrors.dotsrc.org/gcrypt/libgcrypt/libgcrypt-1.11.0.tar.bz2}"
+    read -ra _URL_GRUB          <<< "${CLI_URL_GRUB:-https://ftpmirror.gnu.org/grub/grub-2.12.tar.xz https://ftp.jaist.ac.jp/pub/GNU/grub/grub-2.12.tar.xz https://mirrors.kernel.org/gnu/grub/grub-2.12.tar.xz https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz}"
+    read -ra _URL_EXPAT         <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
 
     log_info "CLI パッケージのダウンロード中..."
-    for url in "${CLI_PKGS[@]}"; do
-        [[ "$url" =~ ^# ]] && continue
-        fname=$(basename "$url")
-        if [[ -f "${fname}" ]]; then
+    # 書式: "ファイル名 URL変数名のスペース区切りリスト"
+    # smart_wget がフォールバック込みで処理するため URL を配列ごと渡す
+    _cli_pkg() {
+        local fname="$1"; shift
+        local urls=("$@")
+        if [[ -s "${fname}" ]]; then
             echo "  [CACHED] ${fname}"
         else
-            echo "  [DL] ${fname}"
-            wget -q --timeout=120 --tries=3 "${url}" -O "${fname}.tmp" \
-                && mv "${fname}.tmp" "${fname}" \
-                || { echo "  [WARN] ダウンロード失敗: ${url}"; rm -f "${fname}.tmp"; }
+            smart_wget "${fname}" "${urls[@]}" \
+                || echo "  [WARN] ダウンロード失敗: ${fname}"
         fi
-    done
+    }
+
+    _cli_pkg "sudo-1.9.15p5.tar.gz"                    "${_URL_SUDO[@]}"
+    _cli_pkg "nano-8.3.tar.xz"                         "${_URL_NANO[@]}"
+    _cli_pkg "curl-8.11.1.tar.xz"                      "${_URL_CURL[@]}"
+    _cli_pkg "pcre2-10.44.tar.bz2"                     "${_URL_PCRE2[@]}"
+    _cli_pkg "git-2.47.2.tar.xz"                       "${_URL_GIT[@]}"
+    _cli_pkg "htop-3.3.0.tar.xz"                       "${_URL_HTOP[@]}"
+    _cli_pkg "libevent-2.1.12-stable.tar.gz"            "${_URL_LIBEVENT[@]}"
+    _cli_pkg "tmux-3.5a.tar.gz"                        "${_URL_TMUX[@]}"
+    _cli_pkg "tree-2.1.3.tgz"                          "${_URL_TREE[@]}"
+    _cli_pkg "bash-completion-2.14.0.tar.xz"           "${_URL_BASH_COMPLETION[@]}"
+    _cli_pkg "dbus-1.15.8.tar.xz"                      "${_URL_DBUS[@]}"
+    _cli_pkg "iproute2-6.12.0.tar.xz"                  "${_URL_IPROUTE2[@]}"
+    _cli_pkg "dhcpcd-10.0.10.tar.xz"                   "${_URL_DHCPCD[@]}"
+    _cli_pkg "openssh-9.9p1.tar.gz"                    "${_URL_OPENSSH[@]}"
+    _cli_pkg "libgpg-error-1.50.tar.bz2"               "${_URL_LIBGPG_ERROR[@]}"
+    _cli_pkg "libgcrypt-1.11.0.tar.bz2"                "${_URL_LIBGCRYPT[@]}"
+    _cli_pkg "grub-2.12.tar.xz"                        "${_URL_GRUB[@]}"
+    # expat: Step2 で取得済みのはずだがなければ補完
+    if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
+        _cli_pkg "expat-2.6.2.tar.xz"                  "${_URL_EXPAT[@]}"
+    fi
 
     done_flag step5_cli_sources
     log_info "Step5 完了"
