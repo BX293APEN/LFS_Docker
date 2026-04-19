@@ -337,11 +337,240 @@ else
     log_skip "Step3"
 fi
 
-# Step3 完了後: chroot に備えて LFS ツリーの所有権を root に戻す
-# (LFS Book Chapter 4: chroot 前に root 所有に戻すことが必須)
+
+# =============================================================================
+# Step 3.5: Chapter 6 ― クロスコンパイルによる一時ツール群
+# (chroot に入る前に /usr/bin/env 等を LFS ツリーに配置する)
+# LFS Book 12.2 Chapter 6 に相当
+# =============================================================================
+if ! flagged step3_5_temptools; then
+    log_step "Step3.5: 一時ツール群ビルド (Chapter 6)"
+
+    # lfs ユーザーが書き込めるよう再度 chown
+    chown -R lfs:lfs "${LFS}/tools" "${LFS}/usr" "${LFS}/lib" "${LFS}/lib64" \
+        "${LFS}/bin" "${LFS}/sbin" "${LFS}/etc" "${LFS}/var" 2>/dev/null || true
+
+    cat > /home/lfs/build-temptools.sh << 'TTEOF'
+#!/bin/bash
+set -eo pipefail
+source ~/.bashrc
+
+SRC="${LFS}/sources"
+
+tt_build() {
+    local name="$1" tarball="$2" fn="$3"
+    echo "[TT] $(date '+%H:%M:%S') ${name}"
+    cd "${SRC}"
+    local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
+    [[ -z "${dir}" ]] && { echo "[ERROR] tarball 展開失敗: ${tarball}"; exit 1; }
+    tar -xf "${tarball}"
+    cd "${dir}"
+    ${fn}
+    cd "${SRC}"
+    rm -rf "${dir}"
+}
+
+# ── M4 ──────────────────────────────────────────────────────
+do_m4() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" --build="$(build-aux/config.guess 2>/dev/null || config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "M4" "$(ls ${SRC}/m4-*.tar.*)" do_m4
+
+# ── Ncurses ─────────────────────────────────────────────────
+do_ncurses() {
+    sed -i s/mawk// configure
+    mkdir build && cd build
+    ../configure
+    make -C include && make -C progs tic
+    cd ..
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(./config.guess)" --mandir=/usr/share/man \
+        --with-manpage-format=normal --with-shared --without-normal \
+        --with-cxx-shared --without-debug --without-ada \
+        --disable-stripping
+    make && make DESTDIR="${LFS}" TIC_PATH="${LFS}/sources/ncurses-*/build/progs/tic" install
+    ln -sv libncursesw.so "${LFS}/usr/lib/libncurses.so"
+    sed -e 's/^#if.*XOPEN.*$/#if 1/' -i "${LFS}/usr/include/curses.h" 2>/dev/null || true
+}
+tt_build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.*)" do_ncurses
+
+# ── Bash ────────────────────────────────────────────────────
+do_bash() {
+    ./configure --prefix=/usr --build="$(sh support/config.guess)" \
+        --host="${LFS_TGT}" --without-bash-malloc \
+        bash_cv_strtold_broken=no
+    make && make DESTDIR="${LFS}" install
+    ln -sv bash "${LFS}/bin/sh" 2>/dev/null || true
+}
+tt_build "Bash" "$(ls ${SRC}/bash-*.tar.*)" do_bash
+
+# ── Coreutils ───────────────────────────────────────────────
+do_coreutils() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(build-aux/config.guess)" \
+        --enable-install-program=hostname \
+        --enable-no-install-program=kill,uptime
+    make && make DESTDIR="${LFS}" install
+    mv -v "${LFS}/usr/bin/chroot" "${LFS}/usr/sbin/" 2>/dev/null || true
+    mkdir -pv "${LFS}/usr/share/man/man8"
+    mv -v "${LFS}/usr/share/man/man1/chroot.1" \
+          "${LFS}/usr/share/man/man8/chroot.8" 2>/dev/null || true
+    sed -i 's/"1"/"8"/' "${LFS}/usr/share/man/man8/chroot.8" 2>/dev/null || true
+}
+tt_build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.*)" do_coreutils
+
+# ── Diffutils ───────────────────────────────────────────────
+do_diffutils() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(./build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Diffutils" "$(ls ${SRC}/diffutils-*.tar.*)" do_diffutils
+
+# ── File ────────────────────────────────────────────────────
+do_file() {
+    mkdir build && cd build
+    ../configure --disable-bzlib --disable-libseccomp \
+        --disable-xzlib --disable-zlib
+    make
+    cd ..
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(./config.guess)"
+    make FILE_COMPILE="${LFS}/sources/file-*/build/src/file"
+    make DESTDIR="${LFS}" install
+    rm -v "${LFS}/usr/lib/libmagic.la" 2>/dev/null || true
+}
+tt_build "File" "$(ls ${SRC}/file-*.tar.*)" do_file
+
+# ── Findutils ───────────────────────────────────────────────
+do_findutils() {
+    ./configure --prefix=/usr --localstatedir=/var/lib/locate \
+        --host="${LFS_TGT}" --build="$(build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Findutils" "$(ls ${SRC}/findutils-*.tar.*)" do_findutils
+
+# ── Gawk ────────────────────────────────────────────────────
+do_gawk() {
+    sed -i 's/extras//' Makefile.in
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Gawk" "$(ls ${SRC}/gawk-*.tar.*)" do_gawk
+
+# ── Grep ────────────────────────────────────────────────────
+do_grep() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(./build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Grep" "$(ls ${SRC}/grep-*.tar.*)" do_grep
+
+# ── Gzip ────────────────────────────────────────────────────
+do_gzip() {
+    ./configure --prefix=/usr --host="${LFS_TGT}"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Gzip" "$(ls ${SRC}/gzip-*.tar.*)" do_gzip
+
+# ── Make ────────────────────────────────────────────────────
+do_make() {
+    ./configure --prefix=/usr --without-guile \
+        --host="${LFS_TGT}" --build="$(build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Make" "$(ls ${SRC}/make-*.tar.*)" do_make
+
+# ── Patch ───────────────────────────────────────────────────
+do_patch() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Patch" "$(ls ${SRC}/patch-*.tar.*)" do_patch
+
+# ── Sed ─────────────────────────────────────────────────────
+do_sed() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(./build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Sed" "$(ls ${SRC}/sed-*.tar.*)" do_sed
+
+# ── Tar ─────────────────────────────────────────────────────
+do_tar() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(build-aux/config.guess)"
+    make && make DESTDIR="${LFS}" install
+}
+tt_build "Tar" "$(ls ${SRC}/tar-*.tar.*)" do_tar
+
+# ── Xz ──────────────────────────────────────────────────────
+do_xz() {
+    ./configure --prefix=/usr --host="${LFS_TGT}" \
+        --build="$(build-aux/config.guess)" \
+        --disable-static --docdir=/usr/share/doc/xz
+    make && make DESTDIR="${LFS}" install
+    rm -v "${LFS}/usr/lib/liblzma.la" 2>/dev/null || true
+}
+tt_build "Xz" "$(ls ${SRC}/xz-*.tar.*)" do_xz
+
+# ── Binutils Pass2 ──────────────────────────────────────────
+do_binutils_p2() {
+    sed '6009s/$add_dir//' -i ltmain.sh
+    mkdir build && cd build
+    ../configure --prefix=/usr --build="$(../config.guess)" \
+        --host="${LFS_TGT}" --disable-nls --enable-shared \
+        --enable-gprofng=no --disable-werror \
+        --enable-64-bit-bfd --enable-new-dtags \
+        --enable-default-hash-style=gnu
+    make && make DESTDIR="${LFS}" install
+    rm -v "${LFS}"/usr/lib/lib{bfd,ctf,ctf-nobfd,opcodes,sframe}.{a,la} 2>/dev/null || true
+}
+tt_build "Binutils Pass2" "$(ls ${SRC}/binutils-*.tar.*)" do_binutils_p2
+
+# ── GCC Pass2 ───────────────────────────────────────────────
+do_gcc_p2() {
+    tar -xf ../mpfr-*.tar.* && mv mpfr-* mpfr
+    tar -xf ../gmp-*.tar.*  && mv gmp-*  gmp
+    tar -xf ../mpc-*.tar.*  && mv mpc-*  mpc
+    case $(uname -m) in x86_64)
+        sed -e '/m64=/s/lib64/lib/' -i.orig gcc/config/i386/t-linux64 ;; esac
+    sed '/thread_header =/s/@.*@/gthr-posix.h/' \
+        -i libgcc/Makefile.in libstdc++-v3/include/Makefile.in
+    mkdir build && cd build
+    ../configure --build="$(../config.guess)" \
+        --host="${LFS_TGT}" --target="${LFS_TGT}" \
+        LDFLAGS_FOR_TARGET="-L${PWD}/${LFS_TGT}/libgcc" \
+        --prefix=/usr --with-build-sysroot="${LFS}" \
+        --enable-default-pie --enable-default-ssp \
+        --disable-nls --disable-multilib --disable-libatomic \
+        --disable-libgomp --disable-libquadmath --disable-libsanitizer \
+        --disable-libssp --disable-libvtv --enable-languages=c,c++
+    make && make DESTDIR="${LFS}" install
+    ln -sv gcc "${LFS}/usr/bin/cc" 2>/dev/null || true
+}
+tt_build "GCC Pass2" "$(ls ${SRC}/gcc-*.tar.*)" do_gcc_p2
+
+echo "[TT] 一時ツール群ビルド完了"
+TTEOF
+    chown lfs:lfs /home/lfs/build-temptools.sh
+    chmod +x /home/lfs/build-temptools.sh
+
+    su - lfs -c "bash ~/build-temptools.sh" 2>&1 | tee "/${WS}/temptools.log"
+    TT_EXIT=${PIPESTATUS[0]}
+    [[ ${TT_EXIT} -eq 0 ]] || { echo "[ERROR] Step3.5 一時ツール群ビルド失敗 (exit=${TT_EXIT})。/${WS}/temptools.log を確認してください。"; exit 1; }
+    done_flag step3_5_temptools
+    log_info "Step3.5 完了"
+else
+    log_skip "Step3.5"
+fi
+
+# Step3.5 完了後: chroot に備えて LFS ツリーの所有権を root に戻す
 log_info "chroot に備えて LFS ツリーの所有権を root に戻します..."
 chown -R root:root "${LFS}"
-chmod -R a+rX "${LFS}/tools" 2>/dev/null || true
 log_info "chown root 完了"
 
 # =============================================================================
