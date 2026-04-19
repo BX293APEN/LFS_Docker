@@ -55,6 +55,7 @@ RUN apt update && \
         rsync \
         unzip \
         language-pack-ja \
+        libnsl-dev \
         locales && \
     # /bin/sh を bash にする (LFS 要件)
     ln -sf bash /bin/sh && \

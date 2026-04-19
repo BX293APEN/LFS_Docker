@@ -857,6 +857,13 @@ do_glibc_final() {
     ../configure --prefix=/usr --disable-werror \
         --enable-kernel=4.19 --enable-stack-protector=strong \
         --disable-nscd libc_cv_slibdir=/usr/lib
+    # test-installation.pl が -lnss_dns を要求するため、
+    # make install の前に libnss_dns.so シンボリックリンクを作成する。
+    # (Ubuntu 24.04 では libnss_dns.so が存在せず .so.2 のみ)
+    # libnsl.so は Dockerfile で libnsl-dev を追加することで解決済み。
+    if [ -f /usr/lib/x86_64-linux-gnu/libnss_dns.so.2 ] &&        [ ! -e /usr/lib/x86_64-linux-gnu/libnss_dns.so ]; then
+        ln -sv libnss_dns.so.2 /usr/lib/x86_64-linux-gnu/libnss_dns.so
+    fi
     make && make install
     sed '/RTLDLIST=/s@/usr@@g' -i /usr/bin/ldd
     mkdir -p /usr/lib/locale
