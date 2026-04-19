@@ -300,6 +300,15 @@ if ! flagged step2_sources; then
         smart_wget "expat-2.6.2.tar.xz" "${_URL_EXPAT_S2[@]}" || true
     fi
 
+    # ── expect gcc14 パッチ フォールバック ──────────────────────────────────
+    # LFS 12.2 の wget-list に含まれているはずだが、取得できていない場合に補完する
+    if [[ ! -s "expect-5.45.4-gcc14-1.patch" ]]; then
+        log_info "expect-5.45.4-gcc14-1.patch を取得中..."
+        smart_wget "expect-5.45.4-gcc14-1.patch" \
+            "https://www.linuxfromscratch.org/patches/lfs/12.2/expect-5.45.4-gcc14-1.patch" \
+            "https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/12.2/expect-5.45.4-gcc14-1.patch" || true
+    fi
+
     # ── 失敗フラグの集計・報告 ──────────────────────────────────────────────
     mapfile -t failed_flags < <(ls "${FLAG_DIR}"/dl_failed_* 2>/dev/null || true)
     if [[ ${#failed_flags[@]} -gt 0 ]]; then
@@ -973,9 +982,34 @@ do_tcl() {
 build "Tcl" "$(ls ${SRC}/tcl*-src.tar.* 2>/dev/null | head -1)" do_tcl
 
 do_expect() {
+    # ── GCC 14 対応パッチ ────────────────────────────────────────────────────
+    # expect-5.45.4-gcc14-1.patch が無いと GCC14 の C89 デフォルト変更により
+    # configure 内のコンパイルテストが全て失敗し、struct termios が検出されず
+    # pty_.c (空ファイル) が選ばれてエラー終了する。
+    local patch_file
+    patch_file=$(ls ../expect*gcc14*.patch 2>/dev/null | head -1)
+    if [[ -n "${patch_file}" ]]; then
+        patch -Np1 -i "${patch_file}"
+    else
+        echo "[WARN] expect gcc14 パッチが見つかりません。CFLAGS で C99 を強制します。"
+        # パッチなしの場合は CFLAGS に -std=gnu99 を追加して GCC14 互換を確保
+        export CFLAGS="${CFLAGS} -std=gnu99"
+    fi
+
+    # ── configure キャッシュを事前注入 ──────────────────────────────────────
+    # chroot 環境では /dev/pts が制限される場合があり、termios 系の
+    # autoconf テストが誤検出されることがある。
+    # ac_cv_* 変数は「引数」ではなく「--cache-file」で注入するのが正しい方法。
+    cat > config.cache << 'CACHE'
+ac_cv_struct_termios=yes
+ac_cv_struct_termio=no
+ac_cv_have_decl_TIOCGWINSZ=yes
+CACHE
+
     ./configure --prefix=/usr --with-tcl=/usr/lib \
         --enable-shared --disable-rpath \
-        --mandir=/usr/share/man --with-tclinclude=/usr/include
+        --mandir=/usr/share/man --with-tclinclude=/usr/include \
+        --cache-file=config.cache
     make && make install
 }
 build "Expect" "$(ls ${SRC}/expect*.tar.* 2>/dev/null | head -1)" do_expect
