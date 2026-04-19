@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
 # lfs.sh  ―  Docker コンテナ内エントリーポイント
-# 役割: LFS base → BLFS (X.org / Mesa / Qt6 / KDE Plasma / NetworkManager)
-#       → tar.gz 出力
+# 役割: LFS base → BLFS CLI ツール群 → tar.gz 出力
+#
+# ターゲット構成: CLI のみ（KDE不要）
+#   sudo / nano / git / curl / wget / htop / tmux /
+#   tree / rsync / unzip / less / vim / bash-completion
 #
 # 設定は .env を編集してください。スクリプト本体は変更不要です。
 #
@@ -18,8 +21,14 @@ set -eo pipefail
 LFS_VERSION="${LFS_VERSION:-12.2}"
 LFS_ARCH="${LFS_ARCH:-x86_64}"
 LFS_TGT="${LFS_TGT:-x86_64-lfs-linux-gnu}"
-LFS_MIRROR="${LFS_MIRROR:-https://www.linuxfromscratch.org/lfs/downloads}"
-BLFS_MIRROR="${BLFS_MIRROR:-https://www.linuxfromscratch.org/blfs/downloads}"
+
+# ミラーフォールバックリスト（順番に試す）
+LFS_MIRRORS=(
+    "${LFS_MIRROR:-https://www.linuxfromscratch.org/lfs/downloads}"
+    "https://ftp.osuosl.org/pub/lfs/lfs-packages/${LFS_VERSION:-12.2}"
+    "https://mirror.pseudoform.org/lfs/${LFS_VERSION:-12.2}"
+    "https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/${LFS_VERSION:-12.2}"
+)
 CPU_CORE="${CPU_CORE:-4}"
 
 LOCALE="${LOCALE:-ja_JP.UTF-8 UTF-8}"
@@ -33,18 +42,15 @@ OUTPUT_TAR="/${WS}/lfs-rootfs.tar.gz"
 FLAG_DIR="/${WS}/FLAGS"
 DONE_FLAG="${FLAG_DIR}/.build_done"
 
-WGETLIST_URL="${LFS_MIRROR}/${LFS_VERSION}/wget-list-systemd"
-MD5SUMS_URL="${LFS_MIRROR}/${LFS_VERSION}/md5sums"
-
 echo "============================================"
-echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') BLFS ビルド開始"
+echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') LFS CLI ビルド開始"
 echo "  LFS バージョン: ${LFS_VERSION}"
 echo "  アーキ        : ${LFS_ARCH} (${LFS_TGT})"
 echo "  ロケール      : ${LOCALE_NAME}"
 echo "  タイムゾーン  : ${TZ}"
 echo "  並列数        : ${CPU_CORE}"
 echo "  出力先        : ${OUTPUT_TAR}"
-echo "  目標          : KDE Plasma + NetworkManager + sudo + nano"
+echo "  目標          : CLI (sudo nano git curl wget htop tmux ...)"
 echo "============================================"
 
 if [[ -f "$DONE_FLAG" ]]; then
@@ -66,6 +72,24 @@ done_flag() { touch "$(flag "$1")"; }
 log_step() { echo; echo "[====] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 log_info() { echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 log_skip() { echo "[SKIP] $* (済)"; }
+
+# ミラーフォールバック付き wget
+# 使い方: mirror_wget <パス> <ファイル名>
+# 例: mirror_wget "12.2/wget-list-systemd" "wget-list"
+mirror_wget() {
+    local rel_path="$1"
+    local dest="$2"
+    for mirror in "${LFS_MIRRORS[@]}"; do
+        local url="${mirror}/${rel_path}"
+        echo "  [TRY] ${url}"
+        if wget -qO "${dest}" --timeout=60 --tries=2 "${url}"; then
+            echo "  [OK]  ${mirror}"
+            return 0
+        fi
+    done
+    echo "[ERROR] 全ミラーで取得失敗: ${rel_path}"
+    return 1
+}
 
 mount_chroot() {
     mkdir -p "${LFS}"/{dev,proc,sys,run}
@@ -112,19 +136,28 @@ else
 fi
 
 # =============================================================================
-# Step 2: LFS ソースダウンロード
+# Step 2: LFS ソースダウンロード（ミラーフォールバック付き）
 # =============================================================================
 if ! flagged step2_sources; then
     log_step "Step2: LFS ソースダウンロード"
     mkdir -p "${LFS}/sources"
     chmod a+wt "${LFS}/sources"
     cd "${LFS}/sources"
-    wget -qO wget-list "${WGETLIST_URL}" || { echo "[ERROR] wget-list 取得失敗: ${WGETLIST_URL}"; exit 1; }
-    wget -qO md5sums   "${MD5SUMS_URL}"  || true
+
+    # wget-list を取得（ミラーフォールバック）
+    log_info "wget-list 取得中..."
+    mirror_wget "${LFS_VERSION}/wget-list-systemd" "wget-list" || \
+        mirror_wget "${LFS_VERSION}/wget-list" "wget-list" || \
+        { echo "[ERROR] wget-list が取得できませんでした。ミラーを .env で変更してください。"; exit 1; }
+
+    mirror_wget "${LFS_VERSION}/md5sums" "md5sums" || true
+
+    log_info "ソースパッケージ ダウンロード中..."
     wget --continue --input-file=wget-list \
          --directory-prefix="${LFS}/sources" \
          --no-clobber --timeout=60 --tries=3 \
          2>&1 | tee "/${WS}/download-lfs.log" || true
+
     [[ -f md5sums ]] && md5sum --quiet -c md5sums 2>/dev/null && log_info "MD5 OK" || true
     done_flag step2_sources
     log_info "Step2 完了"
@@ -243,7 +276,7 @@ else
 fi
 
 # =============================================================================
-# Step 4: 一時ツール + LFS base システム (chroot)
+# Step 4: LFS base システム (chroot)
 # =============================================================================
 if ! flagged step4_lfs_base; then
     log_step "Step4: LFS base システム chroot ビルド"
@@ -333,11 +366,9 @@ do_glibc_final() {
         --disable-nscd libc_cv_slibdir=/usr/lib
     make && make install
     sed '/RTLDLIST=/s@/usr@@g' -i /usr/bin/ldd
-    # ロケール
     mkdir -p /usr/lib/locale
     localedef -i ja_JP -f UTF-8 ja_JP.UTF-8 2>/dev/null || true
     localedef -i en_US -f UTF-8 en_US.UTF-8 2>/dev/null || true
-    # nsswitch.conf
     cat > /etc/nsswitch.conf << 'NSSEOF'
 passwd: files
 group: files
@@ -349,7 +380,6 @@ services: files
 ethers: files
 rpc: files
 NSSEOF
-    # タイムゾーン
     tar -xf ../../tzdata*.tar.gz
     ZONEINFO=/usr/share/zoneinfo
     mkdir -pv ${ZONEINFO}/{posix,right}
@@ -362,7 +392,6 @@ NSSEOF
     cp zone.tab zone1970.tab iso3166.tab ${ZONEINFO}
     zic -d ${ZONEINFO} -p America/New_York 2>/dev/null || true
     ln -sfv /usr/share/zoneinfo/__TZ__ /etc/localtime
-    # /etc/ld.so.conf
     cat > /etc/ld.so.conf << 'LDEOF'
 /usr/local/lib
 /opt/lib
@@ -396,15 +425,13 @@ build "Bzip2" "$(ls ${SRC}/bzip2-*.tar.*)" do_bzip2
 # ── Xz ──────────────────────────────────────────────────────
 do_xz() {
     ./configure --prefix=/usr --disable-static \
-        --docdir=/usr/share/doc/xz-$(cat build-aux/m4/ax_require_defined.m4 | head -1 | grep -oP '\d+\.\d+\.\d+' || echo "5.6")
+        --docdir=/usr/share/doc/xz-5.6
     make && make install
 }
 build "Xz" "$(ls ${SRC}/xz-*.tar.*)" do_xz
 
 # ── Lz4 ─────────────────────────────────────────────────────
-do_lz4() {
-    make BUILD_STATIC=no PREFIX=/usr && make BUILD_STATIC=no PREFIX=/usr install
-}
+do_lz4() { make BUILD_STATIC=no PREFIX=/usr && make BUILD_STATIC=no PREFIX=/usr install; }
 build "Lz4" "$(ls ${SRC}/lz4-*.tar.*)" do_lz4
 
 # ── Zstd ────────────────────────────────────────────────────
@@ -415,16 +442,13 @@ do_zstd() {
 build "Zstd" "$(ls ${SRC}/zstd-*.tar.*)" do_zstd
 
 # ── File ────────────────────────────────────────────────────
-do_file() {
-    ./configure --prefix=/usr && make && make install
-}
+do_file() { ./configure --prefix=/usr && make && make install; }
 build "File" "$(ls ${SRC}/file-*.tar.*)" do_file
 
 # ── Readline ────────────────────────────────────────────────
 do_readline() {
     sed -i '/MV.*old/d' Makefile.in
     sed -i '/{OLDSUFF}/c:' support/shlib-install
-    sed -i 's/-Wl,-rpath,[^ ]*//' support/shobj-conf 2>/dev/null || true
     ./configure --prefix=/usr --disable-static \
         --with-curses --docdir=/usr/share/doc/readline-8.2
     make SHLIB_LIBS="-lncursesw"
@@ -432,74 +456,57 @@ do_readline() {
 }
 build "Readline" "$(ls ${SRC}/readline-*.tar.*)" do_readline
 
-# ── M4 ──────────────────────────────────────────────────────
-do_m4() {
-    ./configure --prefix=/usr && make && make install
-}
-build "M4" "$(ls ${SRC}/m4-*.tar.*)" do_m4
-
-# ── Bc ──────────────────────────────────────────────────────
-do_bc() {
-    CC=gcc ./configure --prefix=/usr -G -O3 -r && make && make install
-}
-build "Bc" "$(ls ${SRC}/bc-*.tar.*)" do_bc
-
-# ── Flex ────────────────────────────────────────────────────
-do_flex() {
-    ./configure --prefix=/usr --docdir=/usr/share/doc/flex-2.6.4 --disable-static
+# ── M4 / Bc / Flex ──────────────────────────────────────────
+for pkg in m4 bc flex; do
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    [[ -f "$f" ]] || continue
+    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    if [[ "$pkg" == "bc" ]]; then
+        CC=gcc ./configure --prefix=/usr -G -O3 -r
+    elif [[ "$pkg" == "flex" ]]; then
+        ./configure --prefix=/usr --disable-static
+    else
+        ./configure --prefix=/usr
+    fi
     make && make install
-    ln -sv flex /usr/bin/lex
-    ln -sv flex.1 /usr/share/man/man1/lex.1
-}
-build "Flex" "$(ls ${SRC}/flex-*.tar.*)" do_flex
+    [[ "$pkg" == "flex" ]] && { ln -sv flex /usr/bin/lex; ln -sv flex.1 /usr/share/man/man1/lex.1; } || true
+    cd ${SRC} && rm -rf "$dir"
+done
 
-# ── Tcl ─────────────────────────────────────────────────────
+# ── Tcl / Expect / DejaGNU / Pkgconf ────────────────────────
 do_tcl() {
     SRCDIR=$(pwd)
     cd unix
     ./configure --prefix=/usr --mandir=/usr/share/man
     make
-    sed -e "s|$SRCDIR/unix|/usr/lib|" \
-        -e "s|$SRCDIR|/usr/include|" \
-        -i tclConfig.sh
-    sed -e "s|$SRCDIR/unix/pkgs/tdbc1.1.7|/usr/lib/tdbc1.1.7|" \
-        -e "s|$SRCDIR/pkgs/tdbc1.1.7/generic||" \
-        -e "s|$SRCDIR/pkgs/tdbc1.1.7/library||" \
-        -e "s|$SRCDIR/pkgs/tdbc1.1.7|/usr/include|" \
-        -i pkgs/tdbc1.1.7/tdbcConfig.sh
+    sed -e "s|$SRCDIR/unix|/usr/lib|" -e "s|$SRCDIR|/usr/include|" -i tclConfig.sh
     make install
     chmod -v u+w /usr/lib/libtcl8.6.so 2>/dev/null || true
     make install-private-headers
     ln -sfv tclsh8.6 /usr/bin/tclsh
-    mv /usr/share/man/man3/{Thread,Tcl_Thread}.3 2>/dev/null || true
 }
 build "Tcl" "$(ls ${SRC}/tcl*-src.tar.*)" do_tcl
 
-# ── Expect ──────────────────────────────────────────────────
 do_expect() {
     ./configure --prefix=/usr --with-tcl=/usr/lib \
         --enable-shared --disable-rpath \
         --mandir=/usr/share/man --with-tclinclude=/usr/include
     make && make install
-    ln -svf expect5.45.4/libexpect5.45.4.so /usr/lib/libexpect5.45.4.so 2>/dev/null || true
 }
 build "Expect" "$(ls ${SRC}/expect*.tar.*)" do_expect
 
-# ── DejaGNU ─────────────────────────────────────────────────
 do_dejagnu() {
     mkdir build && cd build
-    ../configure --prefix=/usr && makeinfo --plaintext -o doc/dejagnu.txt ../doc/dejagnu.texi 2>/dev/null || true
+    ../configure --prefix=/usr
     make install
 }
 build "DejaGNU" "$(ls ${SRC}/dejagnu-*.tar.*)" do_dejagnu
 
-# ── Pkgconf ─────────────────────────────────────────────────
 do_pkgconf() {
-    ./configure --prefix=/usr --disable-static \
-        --docdir=/usr/share/doc/pkgconf-2.3.0
+    ./configure --prefix=/usr --disable-static --docdir=/usr/share/doc/pkgconf-2.3.0
     make && make install
     ln -sv pkgconf /usr/bin/pkg-config
-    ln -sv pkgconf.1 /usr/share/man/man1/pkg-config.1
 }
 build "Pkgconf" "$(ls ${SRC}/pkgconf-*.tar.*)" do_pkgconf
 
@@ -516,7 +523,7 @@ do_binutils_final() {
 }
 build "Binutils-final" "$(ls ${SRC}/binutils-*.tar.*)" do_binutils_final
 
-# ── GMP ─────────────────────────────────────────────────────
+# ── GMP / MPFR / MPC ────────────────────────────────────────
 do_gmp() {
     ./configure --prefix=/usr --enable-cxx --disable-static \
         --docdir=/usr/share/doc/gmp-6.3.0
@@ -524,7 +531,6 @@ do_gmp() {
 }
 build "GMP" "$(ls ${SRC}/gmp-*.tar.*)" do_gmp
 
-# ── MPFR ────────────────────────────────────────────────────
 do_mpfr() {
     ./configure --prefix=/usr --disable-static \
         --enable-thread-safe --docdir=/usr/share/doc/mpfr-4.2.1
@@ -532,7 +538,6 @@ do_mpfr() {
 }
 build "MPFR" "$(ls ${SRC}/mpfr-*.tar.*)" do_mpfr
 
-# ── MPC ─────────────────────────────────────────────────────
 do_mpc() {
     ./configure --prefix=/usr --disable-static \
         --docdir=/usr/share/doc/mpc-1.3.1
@@ -540,7 +545,7 @@ do_mpc() {
 }
 build "MPC" "$(ls ${SRC}/mpc-*.tar.*)" do_mpc
 
-# ── Attr ────────────────────────────────────────────────────
+# ── Attr / Acl / Libcap / Libxcrypt ────────────────────────
 do_attr() {
     ./configure --prefix=/usr --disable-static --sysconfdir=/etc \
         --docdir=/usr/share/doc/attr-2.5.2
@@ -548,7 +553,6 @@ do_attr() {
 }
 build "Attr" "$(ls ${SRC}/attr-*.tar.*)" do_attr
 
-# ── Acl ─────────────────────────────────────────────────────
 do_acl() {
     ./configure --prefix=/usr --disable-static \
         --docdir=/usr/share/doc/acl-2.3.2
@@ -556,14 +560,12 @@ do_acl() {
 }
 build "Acl" "$(ls ${SRC}/acl-*.tar.*)" do_acl
 
-# ── Libcap ──────────────────────────────────────────────────
 do_libcap() {
     sed -i '/install -m.*STA/d' libcap/Makefile
     make prefix=/usr lib=lib && make prefix=/usr lib=lib install
 }
 build "Libcap" "$(ls ${SRC}/libcap-*.tar.*)" do_libcap
 
-# ── Libxcrypt ───────────────────────────────────────────────
 do_libxcrypt() {
     ./configure --prefix=/usr --enable-hashes=strong,glibc \
         --enable-obsolete-api=no --disable-static \
@@ -632,33 +634,17 @@ do_ncurses() {
 }
 build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.*)" do_ncurses
 
-# ── Sed ─────────────────────────────────────────────────────
-do_sed() { ./configure --prefix=/usr && make && make install; }
-build "Sed" "$(ls ${SRC}/sed-*.tar.*)" do_sed
-
-# ── Psmisc ──────────────────────────────────────────────────
-do_psmisc() { ./configure --prefix=/usr && make && make install; }
-build "Psmisc" "$(ls ${SRC}/psmisc-*.tar.*)" do_psmisc
-
-# ── Gettext ─────────────────────────────────────────────────
-do_gettext() {
-    ./configure --prefix=/usr --disable-static \
-        --docdir=/usr/share/doc/gettext-0.22.5
+# ── Sed / Psmisc / Gettext / Bison / Grep ───────────────────
+for pkg in sed psmisc gettext bison grep; do
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    [[ -f "$f" ]] || continue
+    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    ./configure --prefix=/usr ${pkg:+--disable-static} 2>/dev/null || \
+        ./configure --prefix=/usr
     make && make install
-    chmod -v 0755 /usr/lib/preloadable_libintl.so 2>/dev/null || true
-}
-build "Gettext" "$(ls ${SRC}/gettext-*.tar.*)" do_gettext
-
-# ── Bison ───────────────────────────────────────────────────
-do_bison() {
-    ./configure --prefix=/usr --docdir=/usr/share/doc/bison-3.8.2
-    make && make install
-}
-build "Bison" "$(ls ${SRC}/bison-*.tar.*)" do_bison
-
-# ── Grep ────────────────────────────────────────────────────
-do_grep() { ./configure --prefix=/usr && make && make install; }
-build "Grep" "$(ls ${SRC}/grep-*.tar.*)" do_grep
+    cd ${SRC} && rm -rf "$dir"
+done
 
 # ── Bash ────────────────────────────────────────────────────
 do_bash() {
@@ -670,51 +656,24 @@ do_bash() {
 }
 build "Bash" "$(ls ${SRC}/bash-*.tar.*)" do_bash
 
-# ── Libtool ─────────────────────────────────────────────────
-do_libtool() {
-    ./configure --prefix=/usr && make && make install
-    rm -fv /usr/lib/libltdl.a
-}
-build "Libtool" "$(ls ${SRC}/libtool-*.tar.*)" do_libtool
-
-# ── GDBM ────────────────────────────────────────────────────
-do_gdbm() {
-    ./configure --prefix=/usr --disable-static --enable-libgdbm-compat
+# ── Libtool / GDBM / Gperf / Expat / Inetutils / Less ──────
+for pkg in libtool gdbm gperf expat inetutils less; do
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    [[ -f "$f" ]] || continue
+    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    case "$pkg" in
+        gdbm)      ./configure --prefix=/usr --disable-static --enable-libgdbm-compat ;;
+        inetutils) ./configure --prefix=/usr --bindir=/usr/bin --localstatedir=/var \
+                       --disable-logger --disable-whois --disable-rcp \
+                       --disable-rexec --disable-rlogin --disable-rsh --disable-servers ;;
+        *)         ./configure --prefix=/usr ;;
+    esac
     make && make install
-}
-build "GDBM" "$(ls ${SRC}/gdbm-*.tar.*)" do_gdbm
+    cd ${SRC} && rm -rf "$dir"
+done
 
-# ── Gperf ───────────────────────────────────────────────────
-do_gperf() {
-    ./configure --prefix=/usr --docdir=/usr/share/doc/gperf-3.1
-    make && make install
-}
-build "Gperf" "$(ls ${SRC}/gperf-*.tar.*)" do_gperf
-
-# ── Expat ───────────────────────────────────────────────────
-do_expat() {
-    ./configure --prefix=/usr --disable-static \
-        --docdir=/usr/share/doc/expat-2.6.4
-    make && make install
-}
-build "Expat" "$(ls ${SRC}/expat-*.tar.*)" do_expat
-
-# ── Inetutils ───────────────────────────────────────────────
-do_inetutils() {
-    ./configure --prefix=/usr --bindir=/usr/bin \
-        --localstatedir=/var --disable-logger \
-        --disable-whois --disable-rcp --disable-rexec \
-        --disable-rlogin --disable-rsh --disable-servers
-    make && make install
-    mv -v /usr/{,s}bin/ifconfig 2>/dev/null || true
-}
-build "Inetutils" "$(ls ${SRC}/inetutils-*.tar.*)" do_inetutils
-
-# ── Less ─────────────────────────────────────────────────────
-do_less() { ./configure --prefix=/usr --sysconfdir=/etc && make && make install; }
-build "Less" "$(ls ${SRC}/less-*.tar.*)" do_less
-
-# ── Perl ────────────────────────────────────────────────────
+# ── Perl / XML::Parser / Intltool / Autoconf / Automake ─────
 do_perl() {
     sh Configure -des                              \
         -D prefix=/usr                             \
@@ -734,29 +693,23 @@ do_perl() {
 }
 build "Perl" "$(ls ${SRC}/perl-*.tar.*)" do_perl
 
-# ── XML::Parser ─────────────────────────────────────────────
-do_xml_parser() {
-    perl Makefile.PL && make && make install
-}
-build "XML::Parser" "$(ls ${SRC}/XML-Parser-*.tar.*)" do_xml_parser
+do_xmlparser() { perl Makefile.PL && make && make install; }
+build "XML::Parser" "$(ls ${SRC}/XML-Parser-*.tar.*)" do_xmlparser
 
-# ── Intltool ────────────────────────────────────────────────
 do_intltool() {
     sed -i 's:\\\${:\\\$\\{:' intltool-update.in
     ./configure --prefix=/usr && make && make install
 }
 build "Intltool" "$(ls ${SRC}/intltool-*.tar.*)" do_intltool
 
-# ── Autoconf ────────────────────────────────────────────────
-do_autoconf() { ./configure --prefix=/usr && make && make install; }
-build "Autoconf" "$(ls ${SRC}/autoconf-*.tar.*)" do_autoconf
-
-# ── Automake ────────────────────────────────────────────────
-do_automake() {
-    ./configure --prefix=/usr --docdir=/usr/share/doc/automake-1.17
-    make && make install
-}
-build "Automake" "$(ls ${SRC}/automake-*.tar.*)" do_automake
+for pkg in autoconf automake; do
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    [[ -f "$f" ]] || continue
+    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    ./configure --prefix=/usr && make && make install
+    cd ${SRC} && rm -rf "$dir"
+done
 
 # ── OpenSSL ─────────────────────────────────────────────────
 do_openssl() {
@@ -764,11 +717,10 @@ do_openssl() {
         --libdir=lib shared zlib-dynamic
     make && sed -i '/INSTALL_LIBS/s/libcrypto.a libssl.a//' Makefile
     make MANSUFFIX=ssl install
-    mv -v /usr/share/doc/openssl /usr/share/doc/openssl-3.4.0 2>/dev/null || true
 }
 build "OpenSSL" "$(ls ${SRC}/openssl-*.tar.*)" do_openssl
 
-# ── Kmod ────────────────────────────────────────────────────
+# ── Kmod / Libelf / Libffi / Python ─────────────────────────
 do_kmod() {
     ./configure --prefix=/usr --sysconfdir=/etc \
         --with-openssl --with-xz --with-zstd --with-zlib \
@@ -781,7 +733,6 @@ do_kmod() {
 }
 build "Kmod" "$(ls ${SRC}/kmod-*.tar.*)" do_kmod
 
-# ── Libelf (elfutils) ───────────────────────────────────────
 do_libelf() {
     ./configure --prefix=/usr --disable-debuginfod --enable-libdebuginfod=dummy
     make && make -C libelf install
@@ -790,49 +741,28 @@ do_libelf() {
 }
 build "Libelf" "$(ls ${SRC}/elfutils-*.tar.*)" do_libelf
 
-# ── Libffi ──────────────────────────────────────────────────
 do_libffi() {
     ./configure --prefix=/usr --disable-static --with-gcc-arch=native
     make && make install
 }
 build "Libffi" "$(ls ${SRC}/libffi-*.tar.*)" do_libffi
 
-# ── Python ──────────────────────────────────────────────────
 do_python() {
     ./configure --prefix=/usr --enable-shared \
         --with-system-expat --enable-optimizations
     make && make install
-    cat > /usr/lib/python3.13/EXTERNALLY-MANAGED << 'EOF'
-[externally-managed]
-Error=This Python is part of LFS/BLFS.
-EOF
     ln -sfv python3 /usr/bin/python
 }
 build "Python" "$(ls ${SRC}/Python-*.tar.*)" do_python
 
-# ── Flit-core ───────────────────────────────────────────────
-do_flit() { pip3 install --no-build-isolation --no-index . 2>/dev/null || python3 setup.py install; }
-build "Flit-core" "$(ls ${SRC}/flit_core-*.tar.*)" do_flit 2>/dev/null || true
-
-# ── Wheel / Setuptools ──────────────────────────────────────
-for pkg in wheel setuptools; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] && { cd ${SRC}; dir=$(tar -tf "$f" | head -1 | cut -d/ -f1); tar -xf "$f"; cd "$dir"; pip3 install --no-build-isolation . 2>/dev/null || python3 setup.py install 2>/dev/null || true; cd ${SRC}; rm -rf "$dir"; } || true
-done
-
-# ── Ninja ───────────────────────────────────────────────────
+# ── Ninja / Meson ────────────────────────────────────────────
 do_ninja() {
     python3 configure.py --bootstrap
     install -vm755 ninja /usr/bin/
-    install -vDm644 misc/bash-completion /usr/share/bash-completion/completions/ninja
 }
 build "Ninja" "$(ls ${SRC}/ninja-*.tar.*)" do_ninja
 
-# ── Meson ───────────────────────────────────────────────────
-do_meson() {
-    pip3 install --no-build-isolation --no-index . 2>/dev/null || \
-    python3 setup.py install --optimize=1
-}
+do_meson() { pip3 install --no-build-isolation --no-index . 2>/dev/null || python3 setup.py install --optimize=1; }
 build "Meson" "$(ls ${SRC}/meson-*.tar.*)" do_meson
 
 # ── Coreutils ───────────────────────────────────────────────
@@ -843,68 +773,31 @@ do_coreutils() {
         --prefix=/usr --enable-no-install-program=kill,uptime
     make && make install
     mv -v /usr/bin/chroot /usr/sbin
-    mv -v /usr/share/man/man1/chroot.1 /usr/share/man/man8/chroot.8 2>/dev/null || true
-    sed -i 's/"1"/"8"/' /usr/share/man/man8/chroot.8 2>/dev/null || true
 }
 build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.*)" do_coreutils
 
-# ── Diffutils / Findutils / Gawk / Tar ──────────────────────
-for pkg in diffutils findutils gawk tar; do
+# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo / Which / Vim
+for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which vim; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
     dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
-    ./configure --prefix=/usr && make && make install
-    cd ${SRC} && rm -rf "$dir"
-done
-
-# ── Grep / Gzip / Patch ─────────────────────────────────────
-for pkg in grep gzip patch; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
-    ./configure --prefix=/usr && make && make install
-    cd ${SRC} && rm -rf "$dir"
-done
-
-# ── Make ────────────────────────────────────────────────────
-do_make() { ./configure --prefix=/usr && make && make install; }
-build "Make" "$(ls ${SRC}/make-*.tar.*)" do_make
-
-# ── Patch / Which / Texinfo ─────────────────────────────────
-for pkg in which texinfo; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
-    ./configure --prefix=/usr && make && make install
-    cd ${SRC} && rm -rf "$dir"
-done
-
-# ── Vim ─────────────────────────────────────────────────────
-do_vim() {
-    echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
-    ./configure --prefix=/usr
-    make && make install
-    ln -sv vim /usr/bin/vi
-    cat > /etc/vimrc << 'VIMEOF'
+    if [[ "$pkg" == "vim" ]]; then
+        echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
+        ./configure --prefix=/usr
+        make && make install
+        ln -sv vim /usr/bin/vi
+        cat > /etc/vimrc << 'VIMEOF'
 set nocompatible
 set backspace=2
 set mouse-=a
 syntax on
 set ruler
 VIMEOF
-}
-build "Vim" "$(ls ${SRC}/vim-*.tar.*)" do_vim
-
-# ── MarkupSafe / Jinja2 ─────────────────────────────────────
-for pkg in MarkupSafe Jinja2; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
-    pip3 install --no-build-isolation --no-index . 2>/dev/null || python3 setup.py install
+    else
+        ./configure --prefix=/usr 2>/dev/null || true
+        make && make install
+    fi
     cd ${SRC} && rm -rf "$dir"
 done
 
@@ -913,8 +806,6 @@ do_udev() {
     sed -i -e 's/GROUP="render"/GROUP="video"/' \
            -e 's/GROUP="sgx", //' rules.d/50-udev-default.rules.in
     sed -i -e '/systemd-sysctl/s/^/#/' rules.d/99-systemd.rules.in
-    sed -i -e "s|'install_sysconfdir_samples': True|'install_sysconfdir_samples': False|" \
-        meson.build 2>/dev/null || true
     mkdir build && cd build
     meson setup .. --prefix=/usr --buildtype=release \
         -D mode=release -D dev-kvm-mode=0660 \
@@ -927,38 +818,26 @@ do_udev() {
         -D resolve=false -D coredump=false \
         -D pkgconfig-path=/usr/lib/pkgconfig \
         -D install-tests=false
-    ninja udevadm systemd-hwdb udev:{rules,hwdb}_update
-    DESTDIR=/ ninja install-udevd install-udevadm \
-        install-udev_rules install-udev_hwdb 2>/dev/null || ninja install
-    tar -xf ../../udev-lfs-*.tar.xz 2>/dev/null || true
-    make -f udev-lfs-*/Makefile.lfs install 2>/dev/null || true
-    udevadm hwdb --update 2>/dev/null || true
+    ninja udevadm systemd-hwdb
+    DESTDIR=/ ninja install
 }
 build "Udev(systemd)" "$(ls ${SRC}/systemd-*.tar.*)" do_udev
 
-# ── Man-DB ──────────────────────────────────────────────────
+# ── Man-DB / Procps-ng / Util-linux / E2fsprogs / SysVinit ─
 do_mandb() {
-    ./configure --prefix=/usr --docdir=/usr/share/doc/man-db-2.13.0 \
-        --sysconfdir=/etc --disable-setuid \
-        --enable-cache-owner=bin \
-        --with-browser=/usr/bin/lynx \
-        --with-vgrind=/usr/bin/vgrind \
-        --with-grap=/usr/bin/grap \
+    ./configure --prefix=/usr --sysconfdir=/etc \
+        --disable-setuid --enable-cache-owner=bin \
         --with-systemdtmpfilesdir= --with-systemdsystemunitdir=
     make && make install
 }
 build "Man-DB" "$(ls ${SRC}/man-db-*.tar.*)" do_mandb
 
-# ── Procps-ng ───────────────────────────────────────────────
 do_procps() {
-    ./configure --prefix=/usr --docdir=/usr/share/doc/procps-ng-4.0.4 \
-        --disable-static --disable-kill \
-        --with-systemd
+    ./configure --prefix=/usr --disable-static --disable-kill
     make && make install
 }
 build "Procps-ng" "$(ls ${SRC}/procps-ng-*.tar.*)" do_procps
 
-# ── Util-linux ──────────────────────────────────────────────
 do_utillinux() {
     mkdir -pv /var/lib/hwclock
     ./configure --bindir=/usr/bin --libdir=/usr/lib \
@@ -975,7 +854,6 @@ do_utillinux() {
 }
 build "Util-linux" "$(ls ${SRC}/util-linux-*.tar.*)" do_utillinux
 
-# ── E2fsprogs ───────────────────────────────────────────────
 do_e2fsprogs() {
     mkdir build && cd build
     ../configure --prefix=/usr --sysconfdir=/etc \
@@ -986,7 +864,6 @@ do_e2fsprogs() {
 }
 build "E2fsprogs" "$(ls ${SRC}/e2fsprogs-*.tar.*)" do_e2fsprogs
 
-# ── SysVinit ────────────────────────────────────────────────
 do_sysvinit() {
     patch -Np1 -i ../sysvinit-*.patch 2>/dev/null || true
     make && make install
@@ -1019,127 +896,53 @@ else
 fi
 
 # =============================================================================
-# Step 5: BLFS ソース追加ダウンロード
+# Step 5: CLI ツール追加ダウンロード（KDE不要・軽量構成）
 # =============================================================================
-if ! flagged step5_blfs_sources; then
-    log_step "Step5: BLFS ソース追加ダウンロード"
+if ! flagged step5_cli_sources; then
+    log_step "Step5: CLI ツール追加ダウンロード"
     mkdir -p "${LFS}/sources"
     cd "${LFS}/sources"
 
-    # BLFS Book に対応するパッケージ群を直接 URL 指定でダウンロード
-    # (BLFS は LFS のような統一 wget-list がないため個別に取得)
-    BLFS_PKGS=(
-        # ── sudo ──
+    CLI_PKGS=(
+        # ── sudo ──────────────────────────────────────────────
         "https://www.sudo.ws/dist/sudo-1.9.15p5.tar.gz"
-        # ── nano ──
+        # ── nano ──────────────────────────────────────────────
         "https://www.nano-editor.org/dist/v8/nano-8.3.tar.xz"
-        # ── D-Bus ──
+        # ── git 依存: curl, expat (LFSに含まれる), pcre2 ─────
+        "https://curl.se/download/curl-8.11.1.tar.xz"
+        "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.44/pcre2-10.44.tar.bz2"
+        # ── git ───────────────────────────────────────────────
+        "https://www.kernel.org/pub/software/scm/git/git-2.47.2.tar.xz"
+        # ── htop ──────────────────────────────────────────────
+        "https://github.com/htop-dev/htop/releases/download/3.3.0/htop-3.3.0.tar.xz"
+        # ── tmux 依存: libevent ───────────────────────────────
+        "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
+        # ── tmux ──────────────────────────────────────────────
+        "https://github.com/tmux/tmux/releases/download/3.5a/tmux-3.5a.tar.gz"
+        # ── tree ──────────────────────────────────────────────
+        "https://mama.indstate.edu/users/ice/tree/src/tree-2.1.3.tgz"
+        # ── bash-completion ───────────────────────────────────
+        "https://github.com/scop/bash-completion/releases/download/2.14.0/bash-completion-2.14.0.tar.xz"
+        # ── D-Bus (sudo/polkit に必要) ─────────────────────────
         "https://dbus.freedesktop.org/releases/dbus/dbus-1.15.8.tar.xz"
-        # ── libgpg-error / libgcrypt / libassuan / npth / gnupg ──
+        # ── iproute2 (ip コマンド) ─────────────────────────────
+        "https://www.kernel.org/pub/linux/utils/net/iproute2/iproute2-6.12.0.tar.xz"
+        # ── dhcpcd (ネットワーク設定) ──────────────────────────
+        "https://github.com/NetworkConfiguration/dhcpcd/releases/download/v10.0.10/dhcpcd-10.0.10.tar.xz"
+        # ── openssh ───────────────────────────────────────────
+        "https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-9.9p1.tar.gz"
+        # ── libgpg-error / libgcrypt (openssh 依存) ───────────
         "https://www.gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.50.tar.bz2"
         "https://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.11.0.tar.bz2"
-        "https://www.gnupg.org/ftp/gcrypt/libassuan/libassuan-3.0.0.tar.bz2"
-        "https://www.gnupg.org/ftp/gcrypt/npth/npth-1.8.tar.bz2"
-        # ── polkit (KDE 必須) ──
-        "https://gitlab.freedesktop.org/polkit/polkit/-/archive/125/polkit-125.tar.bz2"
-        # ── libxml2 / libxslt ──
-        "https://download.gnome.org/sources/libxml2/2.13/libxml2-2.13.5.tar.xz"
-        "https://download.gnome.org/sources/libxslt/1.1/libxslt-1.1.42.tar.xz"
-        # ── ICU ──
-        "https://github.com/unicode-org/icu/releases/download/release-75-1/icu4c-75_1-src.tgz"
-        # ── Boost ──
-        "https://github.com/boostorg/boost/releases/download/boost-1.86.0/boost-1.86.0-cmake.tar.xz"
-        # ── SQLite ──
-        "https://sqlite.org/2024/sqlite-autoconf-3470200.tar.gz"
-        # ── libtasn1 / p11-kit / make-ca ──
-        "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.19.0.tar.gz"
-        "https://github.com/p11-glue/p11-kit/releases/download/0.25.5/p11-kit-0.25.5.tar.xz"
-        "https://github.com/lcp/make-ca/archive/v1.14/make-ca-1.14.tar.gz"
-        # ── GLib2 ──
-        "https://download.gnome.org/sources/glib/2.82/glib-2.82.4.tar.xz"
-        # ── dconf ──
-        "https://download.gnome.org/sources/dconf/0.40/dconf-0.40.0.tar.xz"
-        # ── Wayland / Wayland-protocols ──
-        "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.23.1/downloads/wayland-1.23.1.tar.xz"
-        "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.38/downloads/wayland-protocols-1.38.tar.xz"
-        # ── libdrm ──
-        "https://dri.freedesktop.org/libdrm/libdrm-2.4.123.tar.xz"
-        # ── Mesa ──
-        "https://archive.mesa3d.org/mesa-24.3.4.tar.xz"
-        # ── libpng / libjpeg / libwebp / libtiff / FreeType2 ──
-        "https://downloads.sourceforge.net/libpng/libpng-1.6.45.tar.xz"
-        "https://www.ijg.org/files/jpegsrc.v9f.tar.gz"
-        "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.5.0.tar.gz"
-        "https://download.osgeo.org/libtiff/tiff-4.7.0.tar.gz"
-        "https://downloads.sourceforge.net/freetype/freetype-2.13.3.tar.xz"
-        "https://downloads.sourceforge.net/freetype/freetype-doc-2.13.3.tar.xz"
-        "https://downloads.sourceforge.net/freetype/ft2demos-2.13.3.tar.xz"
-        # ── Fontconfig ──
-        "https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.gz"
-        # ── Pixman ──
-        "https://www.cairographics.org/releases/pixman-0.43.4.tar.gz"
-        # ── Cairo / HarfBuzz / Pango ──
-        "https://www.cairographics.org/releases/cairo-1.18.2.tar.xz"
-        "https://github.com/harfbuzz/harfbuzz/releases/download/10.2.0/harfbuzz-10.2.0.tar.xz"
-        "https://download.gnome.org/sources/pango/1.54/pango-1.54.0.tar.xz"
-        # ── ATK / at-spi2-core ──
-        "https://download.gnome.org/sources/atk/2.38/atk-2.38.0.tar.xz"
-        "https://download.gnome.org/sources/at-spi2-core/2.54/at-spi2-core-2.54.1.tar.xz"
-        # ── GDK-Pixbuf / GTK ──
-        "https://download.gnome.org/sources/gdk-pixbuf/2.42/gdk-pixbuf-2.42.12.tar.xz"
-        "https://download.gnome.org/sources/gtk+/3.24/gtk+-3.24.43.tar.xz"
-        # ── X.org (Xwayland) 依存 ──
-        "https://xorg.freedesktop.org/archive/individual/proto/xorgproto-2024.1.tar.xz"
-        "https://xcb.freedesktop.org/dist/xcb-proto-1.17.0.tar.xz"
-        "https://xcb.freedesktop.org/dist/libxcb-1.17.0.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libX11-1.8.10.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXext-1.3.6.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXrender-0.9.12.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXrandr-1.5.4.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXi-1.8.2.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXfixes-6.0.1.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXcursor-1.2.3.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXinerama-1.1.5.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXcomposite-0.4.6.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libXdamage-1.1.6.tar.xz"
-        "https://xorg.freedesktop.org/archive/individual/lib/libxkbcommon-1.7.0.tar.xz"
-        # ── libinput ──
-        "https://gitlab.freedesktop.org/libinput/libinput/-/releases/1.26.2/downloads/libinput-1.26.2.tar.xz"
-        # ── NetworkManager 依存 ──
-        "https://networkmanager.dev/tar/NetworkManager/NetworkManager-1.48.10.tar.xz"
-        "https://github.com/nicowillis/mobile-broadband-provider-info/archive/20240727/mobile-broadband-provider-info-20240727.tar.gz"
-        # ── Qt6 ──
-        "https://download.qt.io/official_releases/qt/6.8/6.8.1/single/qt-everywhere-src-6.8.1.tar.xz"
-        # ── KDE Framework (plasma-desktop-minimal) ──
-        "https://download.kde.org/stable/plasma/6.2.5/plasma-desktop-6.2.5.tar.xz"
-        "https://download.kde.org/stable/plasma/6.2.5/plasma-workspace-6.2.5.tar.xz"
-        "https://download.kde.org/stable/plasma/6.2.5/kwin-6.2.5.tar.xz"
-        "https://download.kde.org/stable/plasma/6.2.5/plasma-nm-6.2.5.tar.xz"
-        # ── SDDM (ディスプレイマネージャー) ──
-        "https://github.com/sddm/sddm/releases/download/v0.21.0/sddm-0.21.0.tar.xz"
-        # ── Konsole ──
-        "https://download.kde.org/stable/release-service/24.12.1/src/konsole-24.12.1.tar.xz"
-        # ── Extra-cmake-modules (KDE ビルドに必須) ──
-        "https://download.kde.org/stable/frameworks/6.9/extra-cmake-modules-6.9.0.tar.xz"
-        # ── KDE Frameworks (最小セット) ──
-        "https://download.kde.org/stable/frameworks/6.9/ki18n-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kconfig-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kcoreaddons-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kwidgetsaddons-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kwindowsystem-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/solid-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kauth-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kcrash-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kjobwidgets-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kservice-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kio-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/kiconthemes-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/knotifications-6.9.0.tar.xz"
-        "https://download.kde.org/stable/frameworks/6.9/plasma-framework-6.9.0.tar.xz"
+        # ── GRUB (ブートローダー) ──────────────────────────────
+        "https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz"
+        # ── Linux kernel ──────────────────────────────────────
+        # ※ LFS Step2 で linux-*.tar.xz はすでに取得済みなので不要
     )
 
-    log_info "BLFS パッケージのダウンロード中... (数十分かかります)"
-    for url in "${BLFS_PKGS[@]}"; do
+    log_info "CLI パッケージのダウンロード中..."
+    for url in "${CLI_PKGS[@]}"; do
+        [[ "$url" =~ ^# ]] && continue
         fname=$(basename "$url")
         if [[ -f "${fname}" ]]; then
             echo "  [CACHED] ${fname}"
@@ -1151,39 +954,35 @@ if ! flagged step5_blfs_sources; then
         fi
     done
 
-    # CMake (BLFS ビルドに必須)
-    CMAKE_VER="3.31.4"
-    CMAKE_URL="https://cmake.org/files/v${CMAKE_VER%.*}/cmake-${CMAKE_VER}.tar.gz"
-    fname="cmake-${CMAKE_VER}.tar.gz"
-    [[ -f "$fname" ]] || wget -q --tries=3 "${CMAKE_URL}" -O "$fname" || true
-
-    done_flag step5_blfs_sources
+    done_flag step5_cli_sources
     log_info "Step5 完了"
 else
     log_skip "Step5"
 fi
 
 # =============================================================================
-# Step 6: BLFS ビルド (chroot 内)
+# Step 6: CLI ツール chroot ビルド
 # =============================================================================
-if ! flagged step6_blfs; then
-    log_step "Step6: BLFS ビルド (sudo / nano / NetworkManager / KDE Plasma)"
+if ! flagged step6_cli; then
+    log_step "Step6: CLI ツール ビルド"
     mount_chroot
     cp /etc/resolv.conf "${LFS}/etc/resolv.conf"
     mountpoint -q "${LFS}/sources" || mount --bind "${LFS}/sources" "${LFS}/sources"
 
-    cat > "${LFS}/tmp/build-blfs.sh" << 'BLFSEOF'
+    cat > "${LFS}/tmp/build-cli.sh" << 'CLIEOF'
 #!/bin/bash
 set -eo pipefail
 export MAKEFLAGS="-j__CPU_CORE__"
 export TERM=xterm-256color
-export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/share/pkgconfig"
 SRC=/sources
 
 build() {
     local name="$1" tarball="$2" fn="$3"
-    [[ -f "${SRC}/${tarball}" ]] || { echo "[SKIP] ${name}: tarball なし"; return 0; }
-    echo "[BLFS] $(date '+%H:%M:%S') ${name}"
+    if [[ ! -f "${SRC}/${tarball}" ]]; then
+        echo "[SKIP] ${name}: ${tarball} なし"
+        return 0
+    fi
+    echo "[CLI] $(date '+%H:%M:%S') ${name}"
     cd "${SRC}"
     local dir; dir=$(tar -tf "${tarball}" | head -1 | cut -d/ -f1)
     tar -xf "${tarball}"
@@ -1193,34 +992,35 @@ build() {
     rm -rf "${dir}"
 }
 
-cmake_build() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          "$@" ..
+# ── D-Bus ────────────────────────────────────────────────────
+do_dbus() {
+    ./configure --prefix=/usr --sysconfdir=/etc \
+        --localstatedir=/var --runstatedir=/run \
+        --disable-static --disable-doxygen-docs \
+        --disable-xml-docs \
+        --with-system-socket=/run/dbus/system_bus_socket
     make && make install
+    dbus-uuidgen --ensure
 }
+build "D-Bus" "dbus-1.15.8.tar.xz" do_dbus
 
-# ── CMake ────────────────────────────────────────────────────
-do_cmake() {
-    sed -i '/"lib64"/s/64//' Modules/GNUInstallDirs.cmake
-    ./bootstrap --prefix=/usr --system-libs \
-        --mandir=/share/man --no-system-jsoncpp \
-        --no-system-cppdap --no-system-librhash \
-        --docdir=/share/doc/cmake-3.31.4 -- -DCMAKE_USE_OPENSSL=ON
-    make && make install
-}
-build "CMake" "cmake-3.31.4.tar.gz" do_cmake
+# ── libgpg-error ─────────────────────────────────────────────
+do_libgpgerror() { ./configure --prefix=/usr && make && make install; }
+build "libgpg-error" "libgpg-error-1.50.tar.bz2" do_libgpgerror
+
+# ── libgcrypt ────────────────────────────────────────────────
+do_libgcrypt() { ./configure --prefix=/usr && make && make install; }
+build "libgcrypt" "libgcrypt-1.11.0.tar.bz2" do_libgcrypt
 
 # ── sudo ─────────────────────────────────────────────────────
 do_sudo() {
     ./configure --prefix=/usr --libexecdir=/usr/lib \
         --with-secure-path --with-all-insults \
-        --with-env-editor --docdir=/usr/share/doc/sudo-1.9.15p5 \
+        --with-env-editor \
         --with-passprompt="[sudo] %u のパスワード: "
     make && make install
     # wheel グループに sudo 権限付与
+    mkdir -p /etc/sudoers.d
     cat > /etc/sudoers.d/wheel << 'SUDOEOF'
 %wheel ALL=(ALL:ALL) ALL
 SUDOEOF
@@ -1230,572 +1030,248 @@ build "sudo" "sudo-1.9.15p5.tar.gz" do_sudo
 
 # ── nano ─────────────────────────────────────────────────────
 do_nano() {
-    ./configure --prefix=/usr \
-        --sysconfdir=/etc     \
-        --enable-utf8         \
-        --docdir=/usr/share/doc/nano-8.3
+    ./configure --prefix=/usr --sysconfdir=/etc \
+        --enable-utf8 --docdir=/usr/share/doc/nano-8.3
     make && make install
     install -v -m644 doc/sample.nanorc /etc/nanorc
-    cat > /etc/nanorc << 'NANOEOF'
+    # シンタックスハイライト有効化
+    cat >> /etc/nanorc << 'NANOEOF'
 set autoindent
 set constantshow
-set fill 72
 set historylog
 set mouse
-set nohelp
 set positionlog
-set quickblank
-set regexp
+set tabsize 4
 include "/usr/share/nano/*.nanorc"
 NANOEOF
 }
 build "nano" "nano-8.3.tar.xz" do_nano
 
-# ── libgpg-error ─────────────────────────────────────────────
-do_libgpgerror() {
-    ./configure --prefix=/usr && make && make install
-}
-build "libgpg-error" "libgpg-error-1.50.tar.bz2" do_libgpgerror
-
-# ── libgcrypt ────────────────────────────────────────────────
-do_libgcrypt() {
-    ./configure --prefix=/usr && make && make install
-}
-build "libgcrypt" "libgcrypt-1.11.0.tar.bz2" do_libgcrypt
-
-# ── D-Bus ────────────────────────────────────────────────────
-do_dbus() {
-    ./configure --prefix=/usr --sysconfdir=/etc \
-        --localstatedir=/var \
-        --runstatedir=/run   \
-        --disable-static     \
-        --disable-doxygen-docs \
-        --disable-xml-docs   \
-        --docdir=/usr/share/doc/dbus-1.15.8 \
-        --with-system-socket=/run/dbus/system_bus_socket
+# ── PCRE2 (git 依存) ─────────────────────────────────────────
+do_pcre2() {
+    ./configure --prefix=/usr --enable-unicode \
+        --enable-jit --enable-pcre2-8 --enable-pcre2-16 \
+        --enable-pcre2-32 --enable-pcre2grep-libz \
+        --enable-pcre2test-libreadline --disable-static
     make && make install
-    ln -sfv /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null || true
 }
-build "D-Bus" "dbus-1.15.8.tar.xz" do_dbus
+build "PCRE2" "pcre2-10.44.tar.bz2" do_pcre2
 
-# ── libtasn1 / p11-kit ───────────────────────────────────────
-do_libtasn1() { ./configure --prefix=/usr --disable-static && make && make install; }
-build "libtasn1" "libtasn1-4.19.0.tar.gz" do_libtasn1
-
-do_p11kit() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D trust_paths=/etc/pki/anchors
-    ninja && ninja install
-    ln -sfv /usr/libexec/p11-kit/trust-extract-compat \
-        /usr/bin/update-ca-certificates
-}
-build "p11-kit" "p11-kit-0.25.5.tar.xz" do_p11kit
-
-# ── libxml2 ──────────────────────────────────────────────────
-do_libxml2() {
+# ── curl ─────────────────────────────────────────────────────
+do_curl() {
     ./configure --prefix=/usr --disable-static \
-        --with-history --with-icu \
-        --docdir=/usr/share/doc/libxml2-2.13.5
+        --enable-threaded-resolver \
+        --with-ssl=/etc/ssl \
+        --with-ca-path=/etc/ssl/certs
     make && make install
 }
-build "libxml2" "libxml2-2.13.5.tar.xz" do_libxml2
+build "curl" "curl-8.11.1.tar.xz" do_curl
 
-# ── libxslt ──────────────────────────────────────────────────
-do_libxslt() {
-    ./configure --prefix=/usr --disable-static \
-        --docdir=/usr/share/doc/libxslt-1.1.42
+# ── git ──────────────────────────────────────────────────────
+do_git() {
+    ./configure --prefix=/usr \
+        --with-gitconfig=/etc/gitconfig \
+        --with-python=python3
     make && make install
+    # git 基本設定
+    cat > /etc/gitconfig << 'GITEOF'
+[core]
+    autocrlf = input
+    safecrlf = warn
+[color]
+    ui = auto
+[pull]
+    rebase = false
+GITEOF
 }
-build "libxslt" "libxslt-1.1.42.tar.xz" do_libxslt
+build "git" "git-2.47.2.tar.xz" do_git
 
-# ── ICU ──────────────────────────────────────────────────────
-do_icu() {
-    cd source
-    ./configure --prefix=/usr && make && make install
-}
-build "ICU" "icu4c-75_1-src.tgz" do_icu
-
-# ── SQLite ───────────────────────────────────────────────────
-do_sqlite() {
-    ./configure --prefix=/usr --disable-static \
-        --enable-fts5 \
-        CPPFLAGS="-DSQLITE_ENABLE_FTS3=1 \
-                   -DSQLITE_ENABLE_FTS4=1 \
-                   -DSQLITE_ENABLE_COLUMN_METADATA=1 \
-                   -DSQLITE_ENABLE_UNLOCK_NOTIFY=1 \
-                   -DSQLITE_ENABLE_DBSTAT_VTAB=1 \
-                   -DSQLITE_SECURE_DELETE=1 \
-                   -DSQLITE_ENABLE_FTS3_TOKENIZER=1"
-    make && make install
-}
-build "SQLite" "sqlite-autoconf-3470200.tar.gz" do_sqlite
-
-# ── GLib2 ────────────────────────────────────────────────────
-do_glib() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D introspection=disabled -D man-pages=disabled
-    ninja && ninja install
-}
-build "GLib2" "glib-2.82.4.tar.xz" do_glib
-
-# ── Boost ────────────────────────────────────────────────────
-do_boost() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          -D boost.locale.icu=ON      \
-          ..
-    make && make install
-}
-build "Boost" "boost-1.86.0-cmake.tar.xz" do_boost
-
-# ── Wayland ──────────────────────────────────────────────────
-do_wayland() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D documentation=false -D dtd_validation=false
-    ninja && ninja install
-}
-build "Wayland" "wayland-1.23.1.tar.xz" do_wayland
-
-do_wayland_protocols() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release
-    ninja && ninja install
-}
-build "Wayland-protocols" "wayland-protocols-1.38.tar.xz" do_wayland_protocols
-
-# ── libdrm ───────────────────────────────────────────────────
-do_libdrm() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D udev=true -D valgrind=disabled
-    ninja && ninja install
-}
-build "libdrm" "libdrm-2.4.123.tar.xz" do_libdrm
-
-# ── libpng ───────────────────────────────────────────────────
-do_libpng() {
+# ── libevent (tmux 依存) ─────────────────────────────────────
+do_libevent() {
     ./configure --prefix=/usr --disable-static
     make && make install
 }
-build "libpng" "libpng-1.6.45.tar.xz" do_libpng
+build "libevent" "libevent-2.1.12-stable.tar.gz" do_libevent
 
-# ── libjpeg ──────────────────────────────────────────────────
-do_libjpeg() { ./configure --prefix=/usr --disable-static && make && make install; }
-build "libjpeg" "jpegsrc.v9f.tar.gz" do_libjpeg
+# ── tmux ─────────────────────────────────────────────────────
+do_tmux() {
+    ./configure --prefix=/usr --sysconfdir=/etc
+    make && make install
+    # tmux 基本設定
+    cat > /etc/tmux.conf << 'TMUXEOF'
+set -g default-terminal "screen-256color"
+set -g history-limit 10000
+set -g mouse on
+set -g status-style bg=colour234,fg=colour255
+bind r source-file /etc/tmux.conf \; display "Reloaded"
+TMUXEOF
+}
+build "tmux" "tmux-3.5a.tar.gz" do_tmux
 
-# ── libwebp ──────────────────────────────────────────────────
-do_libwebp() {
-    ./configure --prefix=/usr --disable-static \
-        --enable-libwebpmux --enable-libwebpdemux \
-        --enable-libwebpdecoder --enable-libwebpextras
+# ── htop ─────────────────────────────────────────────────────
+do_htop() {
+    ./configure --prefix=/usr --disable-unicode
     make && make install
 }
-build "libwebp" "libwebp-1.5.0.tar.gz" do_libwebp
+build "htop" "htop-3.3.0.tar.xz" do_htop
 
-# ── libtiff ──────────────────────────────────────────────────
-do_libtiff() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          ..
-    make && make install
+# ── tree ─────────────────────────────────────────────────────
+do_tree() {
+    make PREFIX=/usr && make PREFIX=/usr install
 }
-build "libtiff" "tiff-4.7.0.tar.gz" do_libtiff
+build "tree" "tree-2.1.3.tgz" do_tree
 
-# ── FreeType2 ────────────────────────────────────────────────
-do_freetype() {
-    sed -ri "s:.*(AUX_MODULES.*valid):\1:" modules.cfg
-    sed -r "s:.*(#.*SUBPIXEL_RENDERING) .*:\1:" \
-        -i include/freetype/config/ftoption.h
-    ./configure --prefix=/usr --enable-freetype-config --disable-static
-    make && make install
-}
-build "FreeType2" "freetype-2.13.3.tar.xz" do_freetype
-
-# ── Fontconfig ───────────────────────────────────────────────
-do_fontconfig() {
+# ── bash-completion ──────────────────────────────────────────
+do_bash_completion() {
     ./configure --prefix=/usr --sysconfdir=/etc \
-        --localstatedir=/var --disable-docs \
-        --docdir=/usr/share/doc/fontconfig-2.15.0
+        --with-bash=/usr/bin/bash
     make && make install
 }
-build "Fontconfig" "fontconfig-2.15.0.tar.gz" do_fontconfig
+build "bash-completion" "bash-completion-2.14.0.tar.xz" do_bash_completion
 
-# ── Pixman ───────────────────────────────────────────────────
-do_pixman() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D libpng=enabled -D tests=disabled
-    ninja && ninja install
+# ── iproute2 ─────────────────────────────────────────────────
+do_iproute2() {
+    sed -i /ARPD/d     Makefile
+    sed -i 's/arpd.8//' man/man8/Makefile
+    make NETNS_RUN_DIR=/run/netns
+    make NETNS_RUN_DIR=/run/netns install
 }
-build "Pixman" "pixman-0.43.4.tar.gz" do_pixman
+build "iproute2" "iproute2-6.12.0.tar.xz" do_iproute2
 
-# ── HarfBuzz ─────────────────────────────────────────────────
-do_harfbuzz() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D graphite2=disabled
-    ninja && ninja install
-}
-build "HarfBuzz" "harfbuzz-10.2.0.tar.xz" do_harfbuzz
-
-# ── Cairo ────────────────────────────────────────────────────
-do_cairo() {
-    ./configure --prefix=/usr \
-        --disable-static      \
-        --enable-tee
-    make && make install
-}
-build "Cairo" "cairo-1.18.2.tar.xz" do_cairo
-
-# ── Pango ────────────────────────────────────────────────────
-do_pango() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D introspection=disabled
-    ninja && ninja install
-}
-build "Pango" "pango-1.54.0.tar.xz" do_pango
-
-# ── ATK ──────────────────────────────────────────────────────
-do_atk() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D introspection=false
-    ninja && ninja install
-}
-build "ATK" "atk-2.38.0.tar.xz" do_atk
-
-# ── at-spi2-core ─────────────────────────────────────────────
-do_atspi() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D introspection=no -D docs=false
-    ninja && ninja install
-}
-build "at-spi2-core" "at-spi2-core-2.54.1.tar.xz" do_atspi
-
-# ── GDK-Pixbuf ───────────────────────────────────────────────
-do_gdkpixbuf() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D man=false -D introspection=disabled
-    ninja && ninja install
-}
-build "GDK-Pixbuf" "gdk-pixbuf-2.42.12.tar.xz" do_gdkpixbuf
-
-# ── X.org プロトコル & xcb ────────────────────────────────────
-do_xorgproto() { ./configure --prefix=/usr && make && make install; }
-build "xorgproto"  "xorgproto-2024.1.tar.xz"  do_xorgproto
-
-do_xcbproto() { ./configure --prefix=/usr && make && make install; }
-build "xcb-proto"  "xcb-proto-1.17.0.tar.xz"  do_xcbproto
-
-do_libxcb() {
-    ./configure --prefix=/usr --without-doxygen --docdir=/usr/share/doc/libxcb-1.17.0
-    make && make install
-}
-build "libxcb"     "libxcb-1.17.0.tar.xz"     do_libxcb
-
-# X.org ライブラリ群 (共通ビルド関数)
-xlib_build() { ./configure --prefix=/usr --disable-static && make && make install; }
-
-build "libX11"       "libX11-1.8.10.tar.xz"      xlib_build
-build "libXext"      "libXext-1.3.6.tar.xz"       xlib_build
-build "libXrender"   "libXrender-0.9.12.tar.xz"   xlib_build
-build "libXrandr"    "libXrandr-1.5.4.tar.xz"     xlib_build
-build "libXi"        "libXi-1.8.2.tar.xz"         xlib_build
-build "libXfixes"    "libXfixes-6.0.1.tar.xz"     xlib_build
-build "libXcursor"   "libXcursor-1.2.3.tar.xz"    xlib_build
-build "libXinerama"  "libXinerama-1.1.5.tar.xz"   xlib_build
-build "libXcomposite" "libXcomposite-0.4.6.tar.xz" xlib_build
-build "libXdamage"   "libXdamage-1.1.6.tar.xz"    xlib_build
-
-# ── libxkbcommon ─────────────────────────────────────────────
-do_libxkbcommon() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D enable-docs=false -D enable-wayland=true \
-        -D enable-x11=true
-    ninja && ninja install
-}
-build "libxkbcommon" "libxkbcommon-1.7.0.tar.xz" do_libxkbcommon
-
-# ── libinput ─────────────────────────────────────────────────
-do_libinput() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D debug-gui=false -D tests=false \
-        -D documentation=false -D udev-dir=/usr/lib/udev
-    ninja && ninja install
-}
-build "libinput" "libinput-1.26.2.tar.xz" do_libinput
-
-# ── Mesa ─────────────────────────────────────────────────────
-do_mesa() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D platforms=wayland,x11     \
-        -D gallium-drivers=auto      \
-        -D vulkan-drivers=auto       \
-        -D valgrind=disabled         \
-        -D libunwind=disabled
-    ninja && ninja install
-}
-build "Mesa" "mesa-24.3.4.tar.xz" do_mesa
-
-# ── GTK3 ─────────────────────────────────────────────────────
-do_gtk3() {
+# ── dhcpcd ───────────────────────────────────────────────────
+do_dhcpcd() {
     ./configure --prefix=/usr --sysconfdir=/etc \
-        --enable-broadway-backend \
-        --enable-wayland-backend  \
-        --enable-x11-backend      \
-        --disable-introspection
+        --runstatedir=/run --dbdir=/var/lib/dhcpcd \
+        --libexecdir=/usr/lib/dhcpcd
     make && make install
-}
-build "GTK3" "gtk+-3.24.43.tar.xz" do_gtk3
-
-# ── polkit ───────────────────────────────────────────────────
-do_polkit() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        -D man=false -D introspection=false \
-        -D authfw=shadow -D tests=false
-    ninja && ninja install
-}
-build "polkit" "polkit-125.tar.bz2" do_polkit
-
-# ── NetworkManager ────────────────────────────────────────────
-do_nm() {
-    mkdir build && cd build
-    meson setup .. --prefix=/usr --buildtype=release \
-        --sysconfdir=/etc --localstatedir=/var \
-        -D nmtui=true       \
-        -D ovs=false        \
-        -D ppp=false        \
-        -D selinux=false    \
-        -D qt=false         \
-        -D introspection=false \
-        -D systemd_journal=false \
-        -D docs=false
-    ninja && ninja install
-
-    # NetworkManager サービス設定
-    mkdir -p /etc/NetworkManager/conf.d
-    cat > /etc/NetworkManager/conf.d/00-defaults.conf << 'NMEOF'
-[main]
-plugins=keyfile
-
-[keyfile]
-path=/etc/NetworkManager/system-connections
-
-[device]
-wifi.backend=wpa_supplicant
-NMEOF
-
     # 起動スクリプト
-    cat > /etc/rc.d/init.d/networkmanager << 'NMSVCEOF'
+    cat > /etc/rc.d/init.d/dhcpcd << 'DHCPEOF'
 #!/bin/bash
-source /lib/lsb/init-functions
 case $1 in
-  start)  dbus-daemon --system --fork 2>/dev/null; NetworkManager --no-daemon & ;;
-  stop)   killall NetworkManager 2>/dev/null || true ;;
-  status) pgrep NetworkManager > /dev/null && echo "running" || echo "stopped" ;;
+  start)  dhcpcd -q -b ;;
+  stop)   dhcpcd -x ;;
+  status) pgrep dhcpcd > /dev/null && echo "running" || echo "stopped" ;;
 esac
-NMSVCEOF
-    chmod +x /etc/rc.d/init.d/networkmanager 2>/dev/null || true
+DHCPEOF
+    chmod +x /etc/rc.d/init.d/dhcpcd 2>/dev/null || true
 }
-build "NetworkManager" "NetworkManager-1.48.10.tar.xz" do_nm
+build "dhcpcd" "dhcpcd-10.0.10.tar.xz" do_dhcpcd
 
-# ── Qt6 ──────────────────────────────────────────────────────
-do_qt6() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr            \
-          -DCMAKE_BUILD_TYPE=Release             \
-          -DCMAKE_INSTALL_LIBDIR=lib             \
-          -DQT_BUILD_EXAMPLES=OFF               \
-          -DQT_BUILD_TESTS=OFF                  \
-          -DQT_FEATURE_wayland=ON               \
-          -DQT_FEATURE_xcb=ON                   \
-          -DQT_FEATURE_opengl=ON                \
-          -DQT_FEATURE_reduce_relocations=OFF   \
-          ..
-    make "-j__CPU_CORE__" && make install
-    # Qt6 環境変数
-    cat > /etc/profile.d/qt6.sh << 'QT6EOF'
-export QT_QPA_PLATFORM=wayland
-export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
-QT6EOF
-}
-build "Qt6" "qt-everywhere-src-6.8.1.tar.xz" do_qt6
-
-# ── extra-cmake-modules ──────────────────────────────────────
-do_ecm() { cmake_build; }
-build "extra-cmake-modules" "extra-cmake-modules-6.9.0.tar.xz" do_ecm
-
-# ── KDE Frameworks (最小セット) ──────────────────────────────
-kde_fw_build() { cmake_build; }
-for fw in ki18n kconfig kcoreaddons kwidgetsaddons kwindowsystem \
-          solid kauth kcrash kjobwidgets kservice kio kiconthemes \
-          knotifications plasma-framework; do
-    ver="6.9.0"
-    build "KF6/${fw}" "${fw}-${ver}.tar.xz" kde_fw_build
-done
-
-# ── kwin ─────────────────────────────────────────────────────
-do_kwin() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          ..
+# ── OpenSSH ──────────────────────────────────────────────────
+do_openssh() {
+    install -v -g sys -m700 -d /var/lib/sshd
+    groupadd -g 50 sshd 2>/dev/null || true
+    useradd -c 'sshd PrivSep' -d /var/lib/sshd \
+            -g sshd -s /usr/bin/false -u 50 sshd 2>/dev/null || true
+    ./configure --prefix=/usr --sysconfdir=/etc/ssh \
+        --with-privsep-path=/var/lib/sshd \
+        --with-default-path=/usr/bin \
+        --with-superuser-path=/usr/sbin:/usr/bin \
+        --with-pid-dir=/run
     make && make install
+    ssh-keygen -A 2>/dev/null || true
 }
-build "KWin" "kwin-6.2.5.tar.xz" do_kwin
+build "OpenSSH" "openssh-9.9p1.tar.gz" do_openssh
 
-# ── plasma-desktop ───────────────────────────────────────────
-do_plasma_desktop() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          ..
+# ── GRUB ─────────────────────────────────────────────────────
+do_grub() {
+    unset {C,CPP,CXX,LD}FLAGS
+    echo depends bli part_gpt >> grub-core/extra_deps.lst
+    ./configure --prefix=/usr          \
+        --sysconfdir=/etc              \
+        --disable-efiemu               \
+        --enable-grub-mkfont           \
+        --with-platform=efi            \
+        --target=x86_64               \
+        --disable-werror
     make && make install
+    mv -v /etc/grub.d/50_osprober /etc/grub.d/50_osprober.bak 2>/dev/null || true
 }
-build "plasma-desktop" "plasma-desktop-6.2.5.tar.xz" do_plasma_desktop
+build "GRUB" "grub-2.12.tar.xz" do_grub
 
-# ── plasma-workspace ─────────────────────────────────────────
-do_plasma_workspace() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          ..
-    make && make install
+# ── Linux カーネル ────────────────────────────────────────────
+do_kernel() {
+    make mrproper
+    # defconfig ベース（最低限の構成）
+    make defconfig
+    # 必要な追加設定
+    scripts/config --enable CONFIG_EFI_STUB
+    scripts/config --enable CONFIG_EFI
+    scripts/config --enable CONFIG_FB_EFI
+    scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
+    scripts/config --enable CONFIG_USB_SUPPORT
+    scripts/config --enable CONFIG_USB_XHCI_HCD
+    scripts/config --enable CONFIG_USB_EHCI_HCD
+    scripts/config --enable CONFIG_ATA
+    scripts/config --enable CONFIG_AHCI
+    scripts/config --enable CONFIG_EXT4_FS
+    scripts/config --enable CONFIG_VFAT_FS
+    scripts/config --enable CONFIG_NLS_UTF8
+    make -j__CPU_CORE__
+    make modules_install
+    cp -v arch/x86/boot/bzImage /boot/vmlinuz-lfs
+    cp -v System.map /boot/System.map-lfs
+    cp -v .config    /boot/config-lfs
 }
-build "plasma-workspace" "plasma-workspace-6.2.5.tar.xz" do_plasma_workspace
+KERNEL_TAR=$(ls ${SRC}/linux-*.tar.* 2>/dev/null | head -1)
+if [[ -f "$KERNEL_TAR" ]]; then
+    build "Linux Kernel" "$(basename $KERNEL_TAR)" do_kernel
+else
+    echo "[WARN] Linux カーネルソースが見つかりません（Step2 で取得済みのはずです）"
+fi
 
-# ── plasma-nm (NetworkManager KDE applet) ────────────────────
-do_plasma_nm() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          ..
-    make && make install
-}
-build "plasma-nm" "plasma-nm-6.2.5.tar.xz" do_plasma_nm
+# ── /etc/profile (環境変数) ───────────────────────────────────
+cat > /etc/profile << 'PROFEOF'
+# /etc/profile: system-wide shell configuration
 
-# ── Konsole ──────────────────────────────────────────────────
-do_konsole() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          ..
-    make && make install
-}
-build "Konsole" "konsole-24.12.1.tar.xz" do_konsole
+export PATH=/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/bin
+export LANG=__LOCALE_NAME__
+export LC_ALL=__LOCALE_NAME__
+export EDITOR=nano
+export PAGER=less
+export LESS="-R"
+export HISTSIZE=1000
+export HISTFILESIZE=2000
 
-# ── SDDM ─────────────────────────────────────────────────────
-do_sddm() {
-    mkdir build && cd build
-    cmake -DCMAKE_INSTALL_PREFIX=/usr \
-          -DCMAKE_BUILD_TYPE=Release  \
-          -DCMAKE_INSTALL_LIBDIR=lib  \
-          -D ENABLE_WAYLAND=ON        \
-          ..
-    make && make install
+# bash-completion
+if [[ -f /usr/share/bash-completion/bash_completion ]]; then
+    source /usr/share/bash-completion/bash_completion
+fi
 
-    # SDDM ユーザー
-    groupadd -g 64 sddm 2>/dev/null || true
-    useradd  -c "SDDM Daemon" -d /var/lib/sddm \
-             -u 64 -g sddm -s /usr/bin/nologin \
-             sddm 2>/dev/null || true
+# カラー表示
+alias ls='ls --color=auto'
+alias ll='ls -lhA --color=auto'
+alias grep='grep --color=auto'
+alias diff='diff --color=auto'
+PROFEOF
 
-    # SDDM 設定
-    mkdir -p /etc/sddm.conf.d
-    cat > /etc/sddm.conf.d/kde_settings.conf << 'SDDMEOF'
-[Autologin]
-Relogin=false
-Session=plasmawayland
-User=
+# ── /root/.bashrc ─────────────────────────────────────────────
+cat > /root/.bashrc << 'RCEOF'
+# Source global profile
+[[ -f /etc/profile ]] && source /etc/profile
 
-[General]
-HaltCommand=/usr/sbin/shutdown -h -P now
-RebootCommand=/usr/sbin/shutdown -r now
+PS1='\[\033[01;31m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 
-[Theme]
-Current=breeze
+alias la='ls -lhA --color=auto'
+alias ..='cd ..'
+alias ...='cd ../..'
+RCEOF
 
-[Users]
-MaximumUid=60513
-MinimumUid=1000
-SDDMEOF
-
-    # SDDM 自動起動 (SysVinit)
-    cat > /etc/rc.d/init.d/sddm << 'SDDMSVC'
-#!/bin/bash
-source /lib/lsb/init-functions
-case $1 in
-  start)  dbus-daemon --system --fork 2>/dev/null
-          NetworkManager --no-daemon &
-          sleep 2
-          sddm & ;;
-  stop)   killall sddm 2>/dev/null || true ;;
-  status) pgrep sddm > /dev/null && echo "running" || echo "stopped" ;;
-esac
-SDDMSVC
-    chmod +x /etc/rc.d/init.d/sddm 2>/dev/null || true
-
-    # /etc/inittab で起動レベル5に SDDM を設定
-    grep -q sddm /etc/inittab 2>/dev/null || \
-    cat >> /etc/inittab << 'INITTABEOF'
-# KDE/SDDM
-x:5:respawn:/etc/rc.d/init.d/sddm start
-INITTABEOF
-}
-build "SDDM" "sddm-0.21.0.tar.xz" do_sddm
-
-# ── 日本語フォント ────────────────────────────────────────────
-echo "[BLFS] 日本語フォント (Noto CJK) のダウンロード"
-mkdir -p /usr/share/fonts/noto-cjk
-NOTO_URL="https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Japanese"
-for f in NotoSansCJKjp-Regular.otf NotoSansCJKjp-Bold.otf; do
-    [[ -f "/usr/share/fonts/noto-cjk/${f}" ]] || \
-    wget -q "${NOTO_URL}/${f}" -O "/usr/share/fonts/noto-cjk/${f}" 2>/dev/null || true
-done
-fc-cache -fv 2>/dev/null || true
-
-# ── ロケール / タイムゾーン / 基本設定 ───────────────────────
-echo "[BLFS] ロケール設定"
-echo "__LOCALE__" >> /etc/locale.gen
-locale-gen 2>/dev/null || \
-    localedef -i ja_JP -f UTF-8 ja_JP.UTF-8 2>/dev/null || true
+# ── ロケール / タイムゾーン / ホスト名 ───────────────────────
+localedef -i ja_JP -f UTF-8 ja_JP.UTF-8 2>/dev/null || true
+localedef -i en_US -f UTF-8 en_US.UTF-8 2>/dev/null || true
 
 cat > /etc/locale.conf << LOCEOF
 LANG=__LOCALE_NAME__
 LC_ALL=__LOCALE_NAME__
 LOCEOF
 
-cat > /etc/vconsole.conf << 'VCEOF'
-KEYMAP=jp106
-FONT=latarcyrheb-sun16
-VCEOF
-
-echo "[BLFS] hostname"
 echo "lfs" > /etc/hostname
 
-echo "[BLFS] root パスワード"
+# ── root パスワード ───────────────────────────────────────────
 echo "root:__ROOT_PASSWORD__" | chpasswd
 
-echo "[BLFS] /etc/fstab"
+# ── /etc/fstab (UUID は morning.sh が設定) ───────────────────
 cat > /etc/fstab << 'FSTABEOF'
 # UUID をデプロイ時に morning.sh が自動設定します
 # UUID=XXXX  /         ext4   defaults,noatime 0 1
@@ -1803,32 +1279,29 @@ cat > /etc/fstab << 'FSTABEOF'
 FSTABEOF
 
 echo ""
-echo "[BLFS] ビルド完了！"
-echo "  - sudo, nano : インストール済み"
-echo "  - NetworkManager : インストール済み"
-echo "  - KDE Plasma 6 (plasma-desktop + kwin + SDDM) : インストール済み"
-BLFSEOF
+echo "[CLI] ===== CLI ビルド完了！ ====="
+echo "  インストール済みツール:"
+echo "    sudo nano git curl wget htop tmux tree"
+echo "    bash-completion iproute2 dhcpcd openssh GRUB Linux kernel"
+CLIEOF
 
     sed -i \
-        -e "s|__CPU_CORE__|${CPU_CORE}|g"           \
-        -e "s|__TZ__|${TZ}|g"                       \
-        -e "s|__LOCALE__|${LOCALE}|g"               \
-        -e "s|__LOCALE_NAME__|${LOCALE_NAME}|g"     \
+        -e "s|__CPU_CORE__|${CPU_CORE}|g"       \
+        -e "s|__LOCALE_NAME__|${LOCALE_NAME}|g" \
         -e "s|__ROOT_PASSWORD__|${ROOT_PASSWORD}|g" \
-        "${LFS}/tmp/build-blfs.sh"
-    chmod +x "${LFS}/tmp/build-blfs.sh"
+        "${LFS}/tmp/build-cli.sh"
+    chmod +x "${LFS}/tmp/build-cli.sh"
 
     chroot "${LFS}" /usr/bin/env -i \
         HOME=/root TERM="${TERM}" \
-        PS1='(blfs) \u:\w\$ ' \
+        PS1='(cli) \u:\w\$ ' \
         PATH=/usr/bin:/usr/sbin \
         MAKEFLAGS="-j${CPU_CORE}" \
-        PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/share/pkgconfig" \
-        /bin/bash /tmp/build-blfs.sh \
-        2>&1 | tee "/${WS}/blfs-build.log"
+        /bin/bash /tmp/build-cli.sh \
+        2>&1 | tee "/${WS}/cli-build.log"
 
     umount "${LFS}/sources" 2>/dev/null || true
-    done_flag step6_blfs
+    done_flag step6_cli
     log_info "Step6 完了"
 else
     log_skip "Step6"
@@ -1856,7 +1329,7 @@ date '+%Y-%m-%d %H:%M:%S' > "${DONE_FLAG}"
 
 echo ""
 echo "============================================"
-echo "[DONE] $(date '+%Y-%m-%d %H:%M:%S') BLFS ビルド完了！"
+echo "[DONE] $(date '+%Y-%m-%d %H:%M:%S') CLI LFS ビルド完了！"
 echo "  出力: ${OUTPUT_TAR}"
 echo "  サイズ: $(du -sh ${OUTPUT_TAR} | cut -f1)"
 echo ""
