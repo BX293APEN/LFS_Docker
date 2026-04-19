@@ -813,6 +813,33 @@ build "Man-pages" "$(ls ${SRC}/man-pages-*.tar.* 2>/dev/null | head -1)" do_manp
 do_iana() { cp services protocols /etc/; }
 build "Iana-etc" "$(ls ${SRC}/iana-etc-*.tar.* 2>/dev/null | head -1)" do_iana
 
+# ── Bison (Glibc-final の configure が必須ツールとして要求) ──
+# glibc 2.40+ の configure は bison を "critical" として扱うため
+# Glibc-final より先にビルドする必要がある
+do_bison_early() {
+    ./configure --prefix=/usr --docdir=/usr/share/doc/bison-$(basename $(pwd) | sed 's/bison-//')
+    make && make install
+}
+build "Bison-early" "$(ls ${SRC}/bison-*.tar.* 2>/dev/null | head -1)" do_bison_early
+
+# ── Python-early (Glibc-final の configure が必須ツールとして要求) ──
+# glibc 2.40+ の configure は python3 を "critical" として扱うため
+# Glibc-final より先にビルドする必要がある
+do_python_early() {
+    # chroot 初期環境では expat / libffi / openssl 等がまだないため
+    # 最低限のフラグで interpreter のみビルドする
+    ./configure --prefix=/usr           \
+        --enable-shared                 \
+        --without-ensurepip             \
+        --with-system-expat=no          \
+        --with-system-ffi=no            \
+        --disable-optimizations
+    make && make install
+    # python コマンドへの symlink (glibc configure が python3 と python の両方を探す)
+    ln -sfv python3 /usr/bin/python 2>/dev/null || true
+}
+build "Python-early" "$(ls ${SRC}/Python-*.tar.* 2>/dev/null | head -1)" do_python_early
+
 # ── Glibc (final) ───────────────────────────────────────────
 do_glibc_final() {
     patch -Np1 -i "../$(ls ../glibc-*.patch 2>/dev/null | head -1)" 2>/dev/null || true
@@ -1091,8 +1118,9 @@ do_ncurses() {
 }
 build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
 
-# ── Sed / Psmisc / Gettext / Bison / Grep ───────────────────
-for pkg in sed psmisc gettext bison grep; do
+# ── Sed / Psmisc / Gettext / Grep ──────────────────────────
+# ※ bison は Glibc-final の前に Bison-early としてビルド済みのため除外
+for pkg in sed psmisc gettext grep; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
