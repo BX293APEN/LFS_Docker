@@ -1084,6 +1084,26 @@ do_libcap() {
 }
 build "Libcap" "$(ls ${SRC}/libcap-*.tar.* 2>/dev/null | head -1)" do_libcap
 
+# ── Perl (Libxcrypt の configure が perl を必須とするため先にビルド) ──────
+do_perl() {
+    sh Configure -des                              \
+        -D prefix=/usr                             \
+        -D vendorprefix=/usr                       \
+        -D privlib=/usr/lib/perl5/5.40/core_perl   \
+        -D archlib=/usr/lib/perl5/5.40/core_perl   \
+        -D sitelib=/usr/lib/perl5/5.40/site_perl   \
+        -D sitearch=/usr/lib/perl5/5.40/site_perl  \
+        -D vendorlib=/usr/lib/perl5/5.40/vendor_perl \
+        -D vendorarch=/usr/lib/perl5/5.40/vendor_perl \
+        -D man1dir=/usr/share/man/man1             \
+        -D man3dir=/usr/share/man/man3             \
+        -D pager="/usr/bin/less -isR"              \
+        -D useshrplib                              \
+        -D usethreads
+    make && make install
+}
+build "Perl" "$(ls ${SRC}/perl-*.tar.* 2>/dev/null | head -1)" do_perl
+
 do_libxcrypt() {
     ./configure --prefix=/usr --enable-hashes=strong,glibc \
         --enable-obsolete-api=no --disable-static \
@@ -1192,26 +1212,8 @@ for pkg in libtool gdbm gperf expat inetutils less; do
     cd ${SRC} && rm -rf "$dir"
 done
 
-# ── Perl / XML::Parser / Intltool / Autoconf / Automake ─────
-do_perl() {
-    sh Configure -des                              \
-        -D prefix=/usr                             \
-        -D vendorprefix=/usr                       \
-        -D privlib=/usr/lib/perl5/5.40/core_perl   \
-        -D archlib=/usr/lib/perl5/5.40/core_perl   \
-        -D sitelib=/usr/lib/perl5/5.40/site_perl   \
-        -D sitearch=/usr/lib/perl5/5.40/site_perl  \
-        -D vendorlib=/usr/lib/perl5/5.40/vendor_perl \
-        -D vendorarch=/usr/lib/perl5/5.40/vendor_perl \
-        -D man1dir=/usr/share/man/man1             \
-        -D man3dir=/usr/share/man/man3             \
-        -D pager="/usr/bin/less -isR"              \
-        -D useshrplib                              \
-        -D usethreads
-    make && make install
-}
-build "Perl" "$(ls ${SRC}/perl-*.tar.* 2>/dev/null | head -1)" do_perl
-
+# ── XML::Parser / Intltool / Autoconf / Automake ─────────────
+# ※ Perl は Libxcrypt より前に移動済み
 do_xmlparser() { perl Makefile.PL && make && make install; }
 build "XML::Parser" "$(ls ${SRC}/XML-Parser-*.tar.* 2>/dev/null | head -1)" do_xmlparser
 
