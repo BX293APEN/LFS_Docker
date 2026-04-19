@@ -1317,12 +1317,18 @@ build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_core
 # ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo / Which / Vim
 for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which vim; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
+    [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
     if [[ "$pkg" == "vim" ]]; then
         echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
-        ./configure --prefix=/usr
+        ./configure --prefix=/usr \
+            --with-features=normal \
+            --without-x \
+            --disable-gui \
+            --disable-gpm \
+            --disable-sysmouse
         make && make install
         ln -sfv vim /usr/bin/vi
         cat > /etc/vimrc << 'VIMEOF'
@@ -1333,10 +1339,15 @@ syntax on
 set ruler
 VIMEOF
     else
-        ./configure --prefix=/usr 2>/dev/null || true
+        timeout 120 ./configure --prefix=/usr || {
+            echo "[WARN] ${pkg} configure 失敗、スキップします"
+            cd ${SRC} && rm -rf "$dir"
+            continue
+        }
         make && make install
     fi
     cd ${SRC} && rm -rf "$dir"
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
 
 # ── Udev (systemd) ──────────────────────────────────────────
