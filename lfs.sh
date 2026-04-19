@@ -110,6 +110,14 @@ cleanup() { umount_chroot; }
 trap cleanup EXIT
 
 # =============================================================================
+# lfs ユーザー/グループ: コンテナ再起動のたびに /etc/passwd がリセットされるため
+# フラグに関わらず毎回作成する
+# =============================================================================
+groupadd lfs 2>/dev/null || true
+useradd -s /bin/bash -g lfs -m -k /dev/null lfs 2>/dev/null || true
+log_info "lfs ユーザー確認済 (uid=$(id -u lfs 2>/dev/null || echo '?'))"
+
+# =============================================================================
 # Step 1: FHS ディレクトリ構造
 # =============================================================================
 if ! flagged step1_dirs; then
@@ -126,13 +134,13 @@ if ! flagged step1_dirs; then
     ln -sfn ../run/lock "${LFS}/var/lock"
     chmod 1777 "${LFS}/tmp" "${LFS}/var/tmp"
     chmod 0750 "${LFS}/root"
-    groupadd lfs 2>/dev/null || true
-    useradd -s /bin/bash -g lfs -m -k /dev/null lfs 2>/dev/null || true
     mkdir -p "${LFS}/tools" && chown lfs:lfs "${LFS}/tools"
     done_flag step1_dirs
     log_info "Step1 完了"
 else
     log_skip "Step1"
+    # tools の所有者をフラグスキップ時も毎回確認・修正
+    [[ -d "${LFS}/tools" ]] && chown lfs:lfs "${LFS}/tools"
 fi
 
 # =============================================================================
