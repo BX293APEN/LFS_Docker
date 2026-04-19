@@ -295,8 +295,11 @@ do_linux_headers() {
 }
 
 do_glibc() {
-    ln -sfnv ../lib/ld-linux-x86-64.so.2 "${LFS}/lib64"
-    ln -sfnv ../lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-lsb-x86-64.so.3"
+    # lib64 はディレクトリとして存在している必要がある（Step1 で作成済み）
+    # その中に ld-linux の symlink を作成する（ディレクトリ自体をリンクにしない）
+    mkdir -p "${LFS}/lib64"
+    ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-linux-x86-64.so.2"
+    ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-lsb-x86-64.so.3"
     patch -Np1 -i "../$(ls ../glibc-*.patch 2>/dev/null | head -1)" 2>/dev/null || true
     mkdir build && cd build
     echo "rootsbindir=/usr/sbin" > configparms
