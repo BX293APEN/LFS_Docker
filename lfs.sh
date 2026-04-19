@@ -242,7 +242,7 @@ pkg_build() {
     local name="$1" tarball="$2" fn="$3"
     echo "[TC] $(date '+%H:%M:%S') ${name}"
     cd "${LFS}/sources"
-    local dir; dir=$(tar -tf "${tarball}" | head -1 | cut -d/ -f1)
+    local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     tar -xf "${tarball}"
     cd "${dir}"
     ${fn}
@@ -351,7 +351,7 @@ build() {
     local name="$1" tarball="$2" fn="$3"
     echo "[BASE] $(date '+%H:%M:%S') ${name}"
     cd "${SRC}"
-    local dir; dir=$(tar -tf "${tarball}" | head -1 | cut -d/ -f1)
+    local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     tar -xf "${tarball}"
     cd "${dir}"
     ${fn}
@@ -516,7 +516,7 @@ build "Readline" "$(ls ${SRC}/readline-*.tar.*)" do_readline
 for pkg in m4 bc flex; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
     if [[ "$pkg" == "bc" ]]; then
         CC=gcc ./configure --prefix=/usr -G -O3 -r
@@ -694,7 +694,7 @@ build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.*)" do_ncurses
 for pkg in sed psmisc gettext bison grep; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
     ./configure --prefix=/usr ${pkg:+--disable-static} 2>/dev/null || \
         ./configure --prefix=/usr
@@ -716,7 +716,7 @@ build "Bash" "$(ls ${SRC}/bash-*.tar.*)" do_bash
 for pkg in libtool gdbm gperf expat inetutils less; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
     case "$pkg" in
         gdbm)      ./configure --prefix=/usr --disable-static --enable-libgdbm-compat ;;
@@ -761,7 +761,7 @@ build "Intltool" "$(ls ${SRC}/intltool-*.tar.*)" do_intltool
 for pkg in autoconf automake; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
     ./configure --prefix=/usr && make && make install
     cd ${SRC} && rm -rf "$dir"
@@ -836,7 +836,7 @@ build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.*)" do_coreutils
 for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which vim; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || continue
-    dir=$(tar -tf "$f" | head -1 | cut -d/ -f1)
+    dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && tar -xf "$f" && cd "$dir"
     if [[ "$pkg" == "vim" ]]; then
         echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
@@ -1041,7 +1041,7 @@ build() {
     fi
     echo "[CLI] $(date '+%H:%M:%S') ${name}"
     cd "${SRC}"
-    local dir; dir=$(tar -tf "${tarball}" | head -1 | cut -d/ -f1)
+    local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     tar -xf "${tarball}"
     cd "${dir}"
     ${fn} || echo "[WARN] ${name} でエラーが発生しましたが続行します"
