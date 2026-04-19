@@ -404,6 +404,8 @@ pkg_build() {
     echo "[TC] $(date '+%H:%M:%S') ${name}"
     cd "${LFS}/sources"
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
+    # 前回の失敗で残ったディレクトリを削除してからクリーンに展開する
+    [[ -n "${dir}" ]] && rm -rf "${dir}"
     tar -xf "${tarball}"
     cd "${dir}"
     ${fn}
@@ -526,6 +528,8 @@ tt_build() {
     cd "${SRC}"
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     [[ -z "${dir}" ]] && { echo "[ERROR] tarball 展開失敗: ${tarball}"; exit 1; }
+    # 前回の失敗で残ったディレクトリを削除してからクリーンに展開する
+    rm -rf "${dir}"
     tar -xf "${tarball}"
     cd "${dir}"
     ${fn}
@@ -859,13 +863,19 @@ do_glibc_final() {
     ../configure --prefix=/usr --disable-werror \
         --enable-kernel=4.19 --enable-stack-protector=strong \
         --disable-nscd libc_cv_slibdir=/usr/lib
-    # test-installation.pl が -lnss_dns を要求するため、
-    # make install の前に libnss_dns.so シンボリックリンクを作成する。
-    # (Ubuntu 24.04 では libnss_dns.so が存在せず .so.2 のみ)
-    # libnsl.so は Dockerfile で libnsl-dev を追加することで解決済み。
-    if [ -f /usr/lib/x86_64-linux-gnu/libnss_dns.so.2 ] &&        [ ! -e /usr/lib/x86_64-linux-gnu/libnss_dns.so ]; then
-        ln -sv libnss_dns.so.2 /usr/lib/x86_64-linux-gnu/libnss_dns.so
-    fi
+    # test-installation.pl はホスト環境の libnss_dns / libnsl を要求するが、
+    # chroot内には存在しないためリンクエラーになる。
+    # LFSブック準拠の対処: Makefileからtest-installationターゲットをsedで除外する。
+    sed -i 's|/usr/bin/perl scripts/test-installation.pl $(DESTDIR)/||' Makefile
+    # 念のため chroot内(/usr/lib) と ホスト側マルチアーチパス の両方でリンクを試みる
+    for _libdir in /usr/lib /usr/lib/x86_64-linux-gnu; do
+        if [ -f "${_libdir}/libnss_dns.so.2" ] && [ ! -e "${_libdir}/libnss_dns.so" ]; then
+            ln -sv libnss_dns.so.2 "${_libdir}/libnss_dns.so"
+        fi
+        if [ -f "${_libdir}/libnsl.so.1" ] && [ ! -e "${_libdir}/libnsl.so" ]; then
+            ln -sv libnsl.so.1 "${_libdir}/libnsl.so"
+        fi
+    done
     make && make install
     sed '/RTLDLIST=/s@/usr@@g' -i /usr/bin/ldd
     mkdir -p /usr/lib/locale
@@ -961,9 +971,10 @@ build "Readline" "$(ls ${SRC}/readline-*.tar.* 2>/dev/null | head -1)" do_readli
 # ── M4 / Bc / Flex ──────────────────────────────────────────
 for pkg in m4 bc flex; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
+    [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
     if [[ "$pkg" == "bc" ]]; then
         CC=gcc ./configure --prefix=/usr -G -O3 -r
     elif [[ "$pkg" == "flex" ]]; then
@@ -974,6 +985,7 @@ for pkg in m4 bc flex; do
     make && make install
     [[ "$pkg" == "flex" ]] && { ln -sfv flex /usr/bin/lex; ln -sfv flex.1 /usr/share/man/man1/lex.1; } || true
     cd ${SRC} && rm -rf "$dir"
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
 
 # ── Tcl / Expect / DejaGNU / Pkgconf ────────────────────────
@@ -1185,13 +1197,15 @@ build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
 # ※ bison は Glibc-final の前に Bison-early としてビルド済みのため除外
 for pkg in sed psmisc gettext grep; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
+    [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
-    ./configure --prefix=/usr ${pkg:+--disable-static} 2>/dev/null || \
-        ./configure --prefix=/usr
+    cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
+    ./configure --prefix=/usr 2>/dev/null || \
+        { echo "[WARN] ${pkg} configure 失敗、スキップします"; cd ${SRC} && rm -rf "$dir"; continue; }
     make && make install
     cd ${SRC} && rm -rf "$dir"
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
 
 # ── Bash ────────────────────────────────────────────────────
@@ -1207,9 +1221,10 @@ build "Bash" "$(ls ${SRC}/bash-*.tar.* 2>/dev/null | head -1)" do_bash
 # ── Libtool / GDBM / Gperf / Expat / Inetutils / Less ──────
 for pkg in libtool gdbm gperf expat inetutils less; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
+    [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
     case "$pkg" in
         gdbm)      ./configure --prefix=/usr --disable-static --enable-libgdbm-compat ;;
         inetutils) ./configure --prefix=/usr --bindir=/usr/bin --localstatedir=/var \
@@ -1219,6 +1234,7 @@ for pkg in libtool gdbm gperf expat inetutils less; do
     esac
     make && make install
     cd ${SRC} && rm -rf "$dir"
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
 
 # ── XML::Parser / Intltool / Autoconf / Automake ─────────────
@@ -1234,11 +1250,13 @@ build "Intltool" "$(ls ${SRC}/intltool-*.tar.* 2>/dev/null | head -1)" do_intlto
 
 for pkg in autoconf automake; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
-    [[ -f "$f" ]] || continue
+    [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
+    cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
     ./configure --prefix=/usr && make && make install
     cd ${SRC} && rm -rf "$dir"
+    echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
 
 # ── OpenSSL ─────────────────────────────────────────────────
