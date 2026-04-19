@@ -158,7 +158,27 @@ if ! flagged step2_sources; then
          --no-clobber --timeout=60 --tries=3 \
          2>&1 | tee "/${WS}/download-lfs.log" || true
 
-    [[ -f md5sums ]] && md5sum --quiet -c md5sums 2>/dev/null && log_info "MD5 OK" || true
+    # ── expat は wget-list のURLが取得できないことがあるので GitHub から直接取得 ──
+    if [[ ! -f "expat-2.6.2.tar.xz" ]]; then
+        log_info "expat-2.6.2.tar.xz が見つからないため GitHub から直接取得します..."
+        wget -q --timeout=120 --tries=3 \
+            "https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz" \
+            -O expat-2.6.2.tar.xz \
+            || { echo "[ERROR] expat のダウンロードに失敗しました"; exit 1; }
+        log_info "expat-2.6.2.tar.xz 取得完了"
+    fi
+
+    # ── md5チェックで失敗ファイルを検出・報告 ──
+    if [[ -f md5sums ]]; then
+        log_info "MD5 チェック中..."
+        FAILED=$(md5sum -c md5sums 2>/dev/null | grep ": FAILED" | sed 's/: FAILED//' || true)
+        if [[ -z "$FAILED" ]]; then
+            log_info "MD5 OK: 全ファイル正常"
+        else
+            echo "[WARN] MD5 不一致ファイル（破損の可能性あり）:"
+            echo "$FAILED"
+        fi
+    fi
     done_flag step2_sources
     log_info "Step2 完了"
 else
@@ -268,7 +288,9 @@ pkg_build "Libstdc++"         "$(ls ${LFS}/sources/gcc-*.tar.*)"       do_libstd
 echo "[TC] クロスツールチェーン完了"
 TCEOF
     chmod +x /tmp/build-toolchain.sh
-    su - lfs -c "bash /tmp/build-toolchain.sh" 2>&1 | tee "/${WS}/toolchain.log"
+    # ログをファイルに書きつつ docker logs でも見えるようにする
+    su - lfs -c "bash /tmp/build-toolchain.sh" 2>&1 | tee "/${WS}/toolchain.log" ; true
+    [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "[ERROR] Step3 クロスツールチェーン失敗。toolchain.log を確認してください。"; exit 1; }
     done_flag step3_toolchain
     log_info "Step3 完了"
 else
@@ -886,7 +908,8 @@ BASEEOF
         PATH=/usr/bin:/usr/sbin \
         MAKEFLAGS="-j${CPU_CORE}" \
         /bin/bash /tmp/build-base.sh \
-        2>&1 | tee "/${WS}/lfs-base.log"
+        2>&1 | tee "/${WS}/lfs-base.log" ; true
+    [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "[ERROR] Step4 LFS base ビルド失敗。lfs-base.log を確認してください。"; exit 1; }
 
     umount "${LFS}/sources" 2>/dev/null || true
     done_flag step4_lfs_base
@@ -1298,7 +1321,8 @@ CLIEOF
         PATH=/usr/bin:/usr/sbin \
         MAKEFLAGS="-j${CPU_CORE}" \
         /bin/bash /tmp/build-cli.sh \
-        2>&1 | tee "/${WS}/cli-build.log"
+        2>&1 | tee "/${WS}/cli-build.log" ; true
+    [[ ${PIPESTATUS[0]} -eq 0 ]] || { echo "[ERROR] Step6 CLI ビルド失敗。cli-build.log を確認してください。"; exit 1; }
 
     umount "${LFS}/sources" 2>/dev/null || true
     done_flag step6_cli
