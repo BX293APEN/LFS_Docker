@@ -1270,9 +1270,12 @@ build "Libffi" "$(ls ${SRC}/libffi-*.tar.* 2>/dev/null | head -1)" do_libffi
 
 do_python() {
     ./configure --prefix=/usr --enable-shared \
-        --with-system-expat --enable-optimizations
+        --with-system-expat --enable-optimizations \
+        --with-ensurepip=install
     make && make install
     ln -sfv python3 /usr/bin/python
+    # pip を最新化して setuptools を確実に導入
+    pip3 install --upgrade pip setuptools 2>/dev/null || true
 }
 build "Python" "$(ls ${SRC}/Python-*.tar.* 2>/dev/null | head -1)" do_python
 
@@ -1283,7 +1286,12 @@ do_ninja() {
 }
 build "Ninja" "$(ls ${SRC}/ninja-*.tar.* 2>/dev/null | head -1)" do_ninja
 
-do_meson() { pip3 install --no-build-isolation --no-index . 2>/dev/null || python3 setup.py install --optimize=1; }
+do_meson() {
+    # meson 1.4+ は pyproject.toml ベース。setup.py のフォールバックは
+    # Python 3.12+ で setuptools が標準外になったため使用不可。
+    # pip3 (--with-ensurepip=install で導入済み) で直接インストールする。
+    pip3 install --no-build-isolation --no-index .
+}
 build "Meson" "$(ls ${SRC}/meson-*.tar.* 2>/dev/null | head -1)" do_meson
 
 # ── Coreutils ───────────────────────────────────────────────
