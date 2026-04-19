@@ -452,7 +452,7 @@ do_glibc() {
     ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-linux-x86-64.so.2"
     ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-lsb-x86-64.so.3"
     patch -Np1 -i "../$(ls ../glibc-*.patch 2>/dev/null | head -1)" 2>/dev/null || true
-    mkdir build && cd build
+    rm -rf build && mkdir build && cd build
     echo "rootsbindir=/usr/sbin" > configparms
     ../configure --prefix=/usr --host="${LFS_TGT}" \
         --build="$(../scripts/config.guess)" --enable-kernel=4.19 \
@@ -762,6 +762,8 @@ build() {
     echo "[BASE] $(date '+%H:%M:%S') ${name}"
     cd "${SRC}"
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
+    # 前回の失敗で残ったディレクトリを削除してからクリーンに展開する
+    [[ -n "${dir}" ]] && rm -rf "${dir}"
     tar -xf "${tarball}"
     cd "${dir}"
     ${fn}
@@ -852,7 +854,7 @@ build "Python-early" "$(ls ${SRC}/Python-*.tar.* 2>/dev/null | head -1)" do_pyth
 # ── Glibc (final) ───────────────────────────────────────────
 do_glibc_final() {
     patch -Np1 -i "../$(ls ../glibc-*.patch 2>/dev/null | head -1)" 2>/dev/null || true
-    mkdir build && cd build
+    rm -rf build && mkdir build && cd build
     echo "rootsbindir=/usr/sbin" > configparms
     ../configure --prefix=/usr --disable-werror \
         --enable-kernel=4.19 --enable-stack-protector=strong \
