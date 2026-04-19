@@ -28,6 +28,35 @@ read -ra LFS_MIRRORS     <<< "${LFS_MIRRORS:-https://ftp.osuosl.org/pub/lfs/lfs-
 read -ra GNU_MIRRORS     <<< "${GNU_MIRRORS:-https://ftpmirror.gnu.org https://ftp.jaist.ac.jp/pub/GNU https://ftp.iij.ad.jp/pub/gnu https://mirrors.kernel.org/gnu https://ftp.gnu.org/gnu}"
 read -ra GCC_INFRA_MIRRORS <<< "${GCC_INFRA_MIRRORS:-https://gcc.gnu.org/pub/gcc/infrastructure}"
 
+# ── wget-list の各URLに対して CLI_URL_<ファイル名> で上書き可能にする辞書 ──
+# キー: ファイル名（basename）, 値: スペース区切りのURLリスト
+# .env の CLI_URL_EXPAT 等が設定されていればそちらを使う
+declare -A PKG_URL_OVERRIDE
+_load_pkg_override() {
+    local fname="$1" envvar="$2"
+    local val="${!envvar:-}"
+    [[ -n "${val}" ]] && PKG_URL_OVERRIDE["${fname}"]="${val}"
+}
+# wget-list に含まれうるパッケージと対応する CLI_URL_* を登録
+_load_pkg_override "expat-2.6.2.tar.xz"             "CLI_URL_EXPAT"
+_load_pkg_override "sudo-1.9.15p5.tar.gz"            "CLI_URL_SUDO"
+_load_pkg_override "nano-8.3.tar.xz"                 "CLI_URL_NANO"
+_load_pkg_override "curl-8.11.1.tar.xz"              "CLI_URL_CURL"
+_load_pkg_override "pcre2-10.44.tar.bz2"             "CLI_URL_PCRE2"
+_load_pkg_override "git-2.47.2.tar.xz"               "CLI_URL_GIT"
+_load_pkg_override "htop-3.3.0.tar.xz"               "CLI_URL_HTOP"
+_load_pkg_override "libevent-2.1.12-stable.tar.gz"   "CLI_URL_LIBEVENT"
+_load_pkg_override "tmux-3.5a.tar.gz"                "CLI_URL_TMUX"
+_load_pkg_override "tree-2.1.3.tgz"                  "CLI_URL_TREE"
+_load_pkg_override "bash-completion-2.14.0.tar.xz"   "CLI_URL_BASH_COMPLETION"
+_load_pkg_override "dbus-1.15.8.tar.xz"              "CLI_URL_DBUS"
+_load_pkg_override "iproute2-6.12.0.tar.xz"          "CLI_URL_IPROUTE2"
+_load_pkg_override "dhcpcd-10.0.10.tar.xz"           "CLI_URL_DHCPCD"
+_load_pkg_override "openssh-9.9p1.tar.gz"            "CLI_URL_OPENSSH"
+_load_pkg_override "libgpg-error-1.50.tar.bz2"       "CLI_URL_LIBGPG_ERROR"
+_load_pkg_override "libgcrypt-1.11.0.tar.bz2"        "CLI_URL_LIBGCRYPT"
+_load_pkg_override "grub-2.12.tar.xz"                "CLI_URL_GRUB"
+
 DL_RETRIES="${DL_RETRIES:-3}"
 DL_TIMEOUT="${DL_TIMEOUT:-90}"
 CPU_CORE="${CPU_CORE:-4}"
@@ -226,15 +255,21 @@ if ! flagged step2_sources; then
     while IFS= read -r pkg_url || [[ -n "${pkg_url}" ]]; do
         [[ -z "${pkg_url}" || "${pkg_url}" =~ ^# ]] && continue
         pkg_file=$(basename "${pkg_url}")
-        # ftp.gnu.org は到達不可の場合があるため GNU_MIRRORS でフォールバック
-        if [[ "${pkg_url}" == *"ftp.gnu.org/gnu/"* ]]; then
-            gnu_subpath="${pkg_url#*ftp.gnu.org/gnu/}"   # 例: bash/bash-5.2.32.tar.gz
-            gnu_subdir="${gnu_subpath%%/*}"               # 例: bash
-            # GNU_MIRRORS + GCC_INFRA_MIRRORS の全URLリストを構築
+
+        # ① .env の CLI_URL_* で上書き指定があればそちらを優先
+        if [[ -n "${PKG_URL_OVERRIDE[${pkg_file}]+x}" ]]; then
+            read -ra override_urls <<< "${PKG_URL_OVERRIDE[${pkg_file}]}"
+            smart_wget "${pkg_file}" "${override_urls[@]}" || (( dl_fail_count++ )) || true
+
+        # ② ftp.gnu.org は到達不可の場合があるため GNU_MIRRORS でフォールバック
+        elif [[ "${pkg_url}" == *"ftp.gnu.org/gnu/"* ]]; then
+            gnu_subpath="${pkg_url#*ftp.gnu.org/gnu/}"
             fallback_urls=()
             for m in "${GNU_MIRRORS[@]}"; do fallback_urls+=("${m}/${gnu_subpath}"); done
             for m in "${GCC_INFRA_MIRRORS[@]}"; do fallback_urls+=("${m}/${pkg_file}"); done
             smart_wget "${pkg_file}" "${fallback_urls[@]}" || (( dl_fail_count++ )) || true
+
+        # ③ その他は wget-list のURLをそのまま使用
         else
             smart_wget "${pkg_file}" "${pkg_url}" || (( dl_fail_count++ )) || true
         fi
