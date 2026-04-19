@@ -200,17 +200,14 @@ else
 fi
 
 # =============================================================================
-# Step 3: クロスツールチェーン (lfs ユーザー)
+# lfs ユーザーの ~/.bashrc: フラグに関わらず毎回再生成する
+# (コンテナ再起動で /home/lfs がリセットされる可能性があるため)
 # =============================================================================
-if ! flagged step3_toolchain; then
-    log_step "Step3: クロスツールチェーン ビルド"
+mkdir -p /home/lfs
+chown lfs:lfs /home/lfs
+chmod 700 /home/lfs
 
-    # lfs ホームディレクトリが確実に存在するよう保証
-    mkdir -p /home/lfs
-    chown lfs:lfs /home/lfs
-    chmod 700 /home/lfs
-
-    cat > /home/lfs/.bashrc << LFSRC
+cat > /home/lfs/.bashrc << LFSRC
 set +h
 umask 022
 LFS="${LFS}"
@@ -221,14 +218,21 @@ CONFIG_SITE="${LFS}/usr/share/config.site"
 export LFS LC_ALL LFS_TGT PATH CONFIG_SITE
 export MAKEFLAGS="-j${CPU_CORE}"
 LFSRC
-    chown lfs:lfs /home/lfs/.bashrc
+chown lfs:lfs /home/lfs/.bashrc
+
+log_info "lfs .bashrc 生成済: LFS=${LFS} LFS_TGT=${LFS_TGT}"
+
+# =============================================================================
+# Step 3: クロスツールチェーン (lfs ユーザー)
+# =============================================================================
+if ! flagged step3_toolchain; then
+    log_step "Step3: クロスツールチェーン ビルド"
 
     # .bashrc の展開結果をログに出力して確認
     log_info "[DEBUG] /home/lfs/.bashrc の内容:"
     cat /home/lfs/.bashrc
 
     # build-toolchain.sh を lfs がアクセスできる場所に配置
-    mkdir -p /home/lfs
     cat > /home/lfs/build-toolchain.sh << 'TCEOF'
 #!/bin/bash
 set -eo pipefail
