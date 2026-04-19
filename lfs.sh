@@ -134,14 +134,20 @@ if ! flagged step1_dirs; then
     ln -sfn ../run/lock "${LFS}/var/lock"
     chmod 1777 "${LFS}/tmp" "${LFS}/var/tmp"
     chmod 0750 "${LFS}/root"
-    mkdir -p "${LFS}/tools" && chown lfs:lfs "${LFS}/tools"
+    mkdir -p "${LFS}/tools"
+    # LFS Book Chapter 4: lfs ユーザーがビルドできるよう LFS ツリー全体を chown
+    chown -R lfs:lfs "${LFS}"
     done_flag step1_dirs
     log_info "Step1 完了"
 else
     log_skip "Step1"
-    # tools の所有者をフラグスキップ時も毎回確認・修正
-    [[ -d "${LFS}/tools" ]] && chown lfs:lfs "${LFS}/tools"
 fi
+
+# Step1 フラグの外: コンテナ再起動で uid がリセットされても
+# lfs ユーザーが LFS ツリーに書き込めるよう毎回 chown する
+log_info "LFS ツリーの所有者を lfs に設定中..."
+chown -R lfs:lfs "${LFS}"
+log_info "chown 完了"
 
 # =============================================================================
 # Step 2: LFS ソースダウンロード（ミラーフォールバック付き）
@@ -330,6 +336,13 @@ TCEOF
 else
     log_skip "Step3"
 fi
+
+# Step3 完了後: chroot に備えて LFS ツリーの所有権を root に戻す
+# (LFS Book Chapter 4: chroot 前に root 所有に戻すことが必須)
+log_info "chroot に備えて LFS ツリーの所有権を root に戻します..."
+chown -R root:root "${LFS}"
+chmod -R a+rX "${LFS}/tools" 2>/dev/null || true
+log_info "chown root 完了"
 
 # =============================================================================
 # Step 4: LFS base システム (chroot)
