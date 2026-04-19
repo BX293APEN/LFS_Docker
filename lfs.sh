@@ -35,7 +35,9 @@ declare -A PKG_URL_OVERRIDE
 _load_pkg_override() {
     local fname="$1" envvar="$2"
     local val="${!envvar:-}"
-    [[ -n "${val}" ]] && PKG_URL_OVERRIDE["${fname}"]="${val}"
+    if [[ -n "${val}" ]]; then
+        PKG_URL_OVERRIDE["${fname}"]="${val}"
+    fi
 }
 # wget-list に含まれうるパッケージと対応する CLI_URL_* を登録
 _load_pkg_override "expat-2.6.2.tar.xz"             "CLI_URL_EXPAT"
