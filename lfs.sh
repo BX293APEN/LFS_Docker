@@ -22,17 +22,14 @@ LFS_VERSION="${LFS_VERSION:-12.2}"
 LFS_ARCH="${LFS_ARCH:-x86_64}"
 LFS_TGT="${LFS_TGT:-x86_64-lfs-linux-gnu}"
 
-# GNU パッケージミラー（.env で上書き可能）
-GNU_MIRROR="${GNU_MIRROR:-https://ftpmirror.gnu.org}"
-GCC_INFRA_MIRROR="${GCC_INFRA_MIRROR:-https://gcc.gnu.org/pub/gcc/infrastructure}"
+# ── ミラーリスト（.env のスペース区切り文字列 → bash 配列に変換）────────────
+# .env で未設定の場合のデフォルト値も兼ねる
+read -ra LFS_MIRRORS     <<< "${LFS_MIRRORS:-https://ftp.osuosl.org/pub/lfs/lfs-packages/${LFS_VERSION} https://www.linuxfromscratch.org/lfs/downloads https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/${LFS_VERSION}}"
+read -ra GNU_MIRRORS     <<< "${GNU_MIRRORS:-https://ftpmirror.gnu.org https://ftp.jaist.ac.jp/pub/GNU https://ftp.iij.ad.jp/pub/gnu https://ftp.gnu.org/gnu}"
+read -ra GCC_INFRA_MIRRORS <<< "${GCC_INFRA_MIRRORS:-https://gcc.gnu.org/pub/gcc/infrastructure}"
 
-# ミラーフォールバックリスト（順番に試す）
-LFS_MIRRORS=(
-    "${LFS_MIRROR:-https://www.linuxfromscratch.org/lfs/downloads}"
-    "https://ftp.osuosl.org/pub/lfs/lfs-packages/${LFS_VERSION:-12.2}"
-    "https://mirror.pseudoform.org/lfs/${LFS_VERSION:-12.2}"
-    "https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/${LFS_VERSION:-12.2}"
-)
+DL_RETRIES="${DL_RETRIES:-3}"
+DL_TIMEOUT="${DL_TIMEOUT:-90}"
 CPU_CORE="${CPU_CORE:-4}"
 
 LOCALE="${LOCALE:-ja_JP.UTF-8 UTF-8}"
@@ -78,22 +75,74 @@ log_info() { echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 log_skip() { echo "[SKIP] $* (済)"; }
 
 # ミラーフォールバック付き wget
-# 使い方: mirror_wget <パス> <ファイル名>
-# 例: mirror_wget "12.2/wget-list-systemd" "wget-list"
-mirror_wget() {
-    local rel_path="$1"
-    local dest="$2"
-    for mirror in "${LFS_MIRRORS[@]}"; do
-        local url="${mirror}/${rel_path}"
-        echo "  [TRY] ${url}"
-        if wget -qO "${dest}" --timeout=60 --tries=2 "${url}"; then
-            echo "  [OK]  ${mirror}"
-            return 0
-        fi
+# =============================================================================
+# smart_wget: ミラーフォールバック + リトライ + 失敗フラグ生成
+#
+# smart_wget <出力ファイル名> <URL> [<URL> ...]
+#   → 指定URLを順番に試す（各URL DL_RETRIES 回リトライ）
+#   → 全失敗時: FLAGS/dl_failed_<名前> を生成して return 1
+#
+# smart_wget_lfs <出力ファイル名> <相対パス>
+#   → LFS_MIRRORS の各ミラー + 相対パスを試す
+#
+# smart_wget_gnu <出力ファイル名> <GNUサブディレクトリ>
+#   → GNU_MIRRORS + GCC_INFRA_MIRRORS を試す
+# =============================================================================
+smart_wget() {
+    local dest="$1"; shift
+    local urls=("$@")
+    local flag_fail="${FLAG_DIR}/dl_failed_${dest//\//_}"
+
+    if [[ -s "${dest}" ]]; then
+        log_info "  [SKIP] ${dest} 取得済み"
+        rm -f "${flag_fail}"
+        return 0
+    fi
+
+    for url in "${urls[@]}"; do
+        local attempt=0
+        while (( attempt < DL_RETRIES )); do
+            (( attempt++ ))
+            echo "  [TRY ${attempt}/${DL_RETRIES}] ${url}"
+            if wget -q --timeout="${DL_TIMEOUT}" --tries=1 \
+                   -O "${dest}.tmp" "${url}" 2>/dev/null \
+               && [[ -s "${dest}.tmp" ]]; then
+                mv "${dest}.tmp" "${dest}"
+                log_info "  [OK] ${dest} ← ${url}"
+                rm -f "${flag_fail}"
+                return 0
+            fi
+            rm -f "${dest}.tmp"
+            [[ ${attempt} -lt ${DL_RETRIES} ]] && sleep 2
+        done
+        echo "  [FAIL] ${url}"
     done
-    echo "[ERROR] 全ミラーで取得失敗: ${rel_path}"
+
+    echo "[WARN] ${dest} の取得に全ミラーで失敗しました"
+    touch "${flag_fail}"
     return 1
 }
+
+smart_wget_lfs() {
+    local dest="$1" rel="$2"
+    local urls=()
+    for m in "${LFS_MIRRORS[@]}"; do urls+=("${m}/${rel}"); done
+    smart_wget "${dest}" "${urls[@]}"
+}
+
+# GNU_MIRRORS + GCC_INFRA_MIRRORS を試す
+# 使い方: smart_wget_gnu <ファイル名> <gnuサブディレクトリ>
+# 例: smart_wget_gnu mpfr-4.2.1.tar.xz mpfr
+smart_wget_gnu() {
+    local dest="$1" subdir="$2"
+    local urls=()
+    for m in "${GNU_MIRRORS[@]}";       do urls+=("${m}/${subdir}/${dest}"); done
+    for m in "${GCC_INFRA_MIRRORS[@]}"; do urls+=("${m}/${dest}"); done
+    smart_wget "${dest}" "${urls[@]}"
+}
+
+# 後方互換 (mirror_wget を使っている箇所向け)
+mirror_wget() { smart_wget_lfs "$2" "$1"; }
 
 mount_chroot() {
     mkdir -p "${LFS}"/{dev,proc,sys,run}
@@ -162,90 +211,76 @@ if ! flagged step2_sources; then
     chmod a+wt "${LFS}/sources"
     cd "${LFS}/sources"
 
-    # wget-list を取得（ミラーフォールバック）
+    # ── wget-list 取得 ────────────────────────────────────────────────────────
     log_info "wget-list 取得中..."
-    mirror_wget "${LFS_VERSION}/wget-list-systemd" "wget-list" || \
-        mirror_wget "${LFS_VERSION}/wget-list" "wget-list" || \
-        { echo "[ERROR] wget-list が取得できませんでした。ミラーを .env で変更してください。"; exit 1; }
+    smart_wget_lfs "wget-list" "${LFS_VERSION}/wget-list-systemd" || \
+    smart_wget_lfs "wget-list" "${LFS_VERSION}/wget-list" || \
+        { echo "[ERROR] wget-list が取得できませんでした。.env の LFS_MIRRORS を確認してください。"; exit 1; }
 
-    mirror_wget "${LFS_VERSION}/md5sums" "md5sums" || true
+    smart_wget_lfs "md5sums" "${LFS_VERSION}/md5sums" || true
 
-    log_info "ソースパッケージ ダウンロード中..."
-    wget --continue --input-file=wget-list \
-         --directory-prefix="${LFS}/sources" \
-         --no-clobber --timeout=60 --tries=3 \
-         2>&1 | tee "/${WS}/download-lfs.log" || true
+    # ── wget-list に記載されたパッケージを smart_wget で1件ずつ取得 ────────────
+    # wget --input-file は失敗してもエラーが埋もれるため、1件ずつ管理する
+    log_info "ソースパッケージ ダウンロード中（${DL_RETRIES}回リトライ付き）..."
+    dl_fail_count=0
+    while IFS= read -r pkg_url || [[ -n "${pkg_url}" ]]; do
+        [[ -z "${pkg_url}" || "${pkg_url}" =~ ^# ]] && continue
+        pkg_file=$(basename "${pkg_url}")
+        smart_wget "${pkg_file}" "${pkg_url}" || (( dl_fail_count++ )) || true
+    done < wget-list
+    log_info "一括ダウンロード完了（失敗: ${dl_fail_count} 件）"
 
-    # ── expat は wget-list のURLが取得できないことがあるので GitHub から直接取得 ──
-    if [[ ! -f "expat-2.6.2.tar.xz" ]]; then
-        log_info "expat-2.6.2.tar.xz が見つからないため GitHub から直接取得します..."
-        wget -q --timeout=120 --tries=3 \
-            "https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz" \
-            -O expat-2.6.2.tar.xz \
-            || { echo "[ERROR] expat のダウンロードに失敗しました"; exit 1; }
-        log_info "expat-2.6.2.tar.xz 取得完了"
+    # ── GCC 依存ライブラリ（mpfr / gmp / mpc）の確実な取得 ──────────────────
+    # wget-list の URL が ftp.gnu.org 直接指定で失敗する場合に GNU_MIRRORS で補完
+    log_info "GCC 依存ライブラリ（mpfr/gmp/mpc）確認・補完..."
+    # 書式: "ファイル名 gnuサブディレクトリ"
+    GCC_DEPS=(
+        "mpfr-4.2.1.tar.xz mpfr"
+        "gmp-6.3.0.tar.xz  gmp"
+        "mpc-1.3.1.tar.gz  mpc"
+    )
+    for dep_info in "${GCC_DEPS[@]}"; do
+        dep_file=$(echo "${dep_info}" | awk '{print $1}')
+        dep_sub=$( echo "${dep_info}" | awk '{print $2}')
+        smart_wget_gnu "${dep_file}" "${dep_sub}" || true
+    done
+
+    # ── expat フォールバック（wget-list に無いバージョンの場合）──────────────
+    if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
+        log_info "expat-2.6.2.tar.xz を GitHub から取得..."
+        smart_wget "expat-2.6.2.tar.xz" \
+            "https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz" || true
     fi
 
-    # ── md5チェックで失敗ファイルを検出・報告 ──
+    # ── 失敗フラグの集計・報告 ──────────────────────────────────────────────
+    mapfile -t failed_flags < <(ls "${FLAG_DIR}"/dl_failed_* 2>/dev/null || true)
+    if [[ ${#failed_flags[@]} -gt 0 ]]; then
+        echo ""
+        echo "[WARN] ========================================================"
+        echo "[WARN] 以下のパッケージのダウンロードに失敗しました:"
+        for f in "${failed_flags[@]}"; do
+            echo "[WARN]   $(basename "${f}" | sed 's/^dl_failed_//')"
+        done
+        echo "[WARN] ========================================================"
+        echo "[WARN] 対処方法:"
+        echo "[WARN]   1. .env の LFS_MIRRORS / GNU_MIRRORS を変更して再試行"
+        echo "[WARN]   2. 手動で ./build/lfs-rootfs/sources/ にファイルを置く"
+        echo "[WARN]   3. rm build/flags/step2_sources && docker compose up"
+        echo ""
+        echo "[WARN] ビルドを続行しますが、該当パッケージのビルドで失敗する可能性があります。"
+    fi
+
+    # ── md5 チェック ────────────────────────────────────────────────────────
     if [[ -f md5sums ]]; then
         log_info "MD5 チェック中..."
-        FAILED=$(md5sum -c md5sums 2>/dev/null | grep ": FAILED" | sed 's/: FAILED//' || true)
-        if [[ -z "$FAILED" ]]; then
+        BAD=$(md5sum -c md5sums 2>/dev/null | grep "FAILED" | sed 's/: FAILED//' || true)
+        if [[ -z "${BAD}" ]]; then
             log_info "MD5 OK: 全ファイル正常"
         else
-            echo "[WARN] MD5 不一致ファイル（破損の可能性あり）:"
-            echo "$FAILED"
+            echo "[WARN] MD5 不一致（破損の可能性あり）:"
+            echo "${BAD}"
         fi
     fi
-    # ── GCC 依存ライブラリ（mpfr / gmp / mpc）の確実な取得 ──────────────────
-    # ftp.gnu.org は低速・不安定なため、wget-list で取得できなかった場合に
-    # GNU_MIRROR / GCC_INFRA_MIRROR からフォールバック取得する
-    log_info "GCC 依存ライブラリ（mpfr/gmp/mpc）の確認..."
-
-    # パッケージ名・バージョン・拡張子の定義
-    # 書式: "pkgname version ext"
-    GCC_DEPS=(
-        "mpfr 4.2.1 tar.xz"
-        "gmp  6.3.0 tar.xz"
-        "mpc  1.3.1 tar.gz"
-    )
-
-    for dep_info in "${GCC_DEPS[@]}"; do
-        dep_name=$(echo "${dep_info}" | awk '{print $1}')
-        dep_ver=$( echo "${dep_info}" | awk '{print $2}')
-        dep_ext=$( echo "${dep_info}" | awk '{print $3}')
-        dep_file="${dep_name}-${dep_ver}.${dep_ext}"
-
-        if [[ -f "${dep_file}" ]]; then
-            log_info "  [OK] ${dep_file} は取得済み"
-            continue
-        fi
-
-        log_info "  [DL] ${dep_file} を取得します..."
-
-        # 試行1: GNU_MIRROR
-        wget -q --timeout=60 --tries=2 \
-            "${GNU_MIRROR}/${dep_name}/${dep_file}" \
-            -O "${dep_file}" 2>/dev/null && \
-            { log_info "  [OK] ${GNU_MIRROR} から取得"; continue; } || rm -f "${dep_file}"
-
-        # 試行2: GCC_INFRA_MIRROR
-        wget -q --timeout=60 --tries=2 \
-            "${GCC_INFRA_MIRROR}/${dep_file}" \
-            -O "${dep_file}" 2>/dev/null && \
-            { log_info "  [OK] ${GCC_INFRA_MIRROR} から取得"; continue; } || rm -f "${dep_file}"
-
-        # 試行3: ftp.gnu.org 直接
-        wget -q --timeout=120 --tries=2 \
-            "https://ftp.gnu.org/gnu/${dep_name}/${dep_file}" \
-            -O "${dep_file}" 2>/dev/null && \
-            { log_info "  [OK] ftp.gnu.org から取得"; continue; } || rm -f "${dep_file}"
-
-        echo "[ERROR] ${dep_file} の取得に失敗しました。"
-        echo "        .env の GNU_MIRROR または GCC_INFRA_MIRROR を変更してください。"
-        exit 1
-    done
-    log_info "GCC 依存ライブラリ 取得完了"
 
     done_flag step2_sources
     log_info "Step2 完了"
@@ -304,6 +339,11 @@ echo "[DEBUG] MAKEFLAGS = ${MAKEFLAGS}"
 
 pkg_build() {
     local name="$1" tarball="$2" fn="$3"
+    if [[ -z "${tarball}" || ! -f "${tarball}" ]]; then
+        echo "[ERROR] pkg_build ${name}: tarball が見つかりません: '${tarball:-<空>}'"
+        ls "${LFS}/sources/" 2>/dev/null | head -20 || true
+        exit 1
+    fi
     echo "[TC] $(date '+%H:%M:%S') ${name}"
     cd "${LFS}/sources"
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -375,11 +415,11 @@ do_libstdcpp() {
     rm -v "${LFS}/usr/lib/lib"{stdc++{,exp},supc++}.la 2>/dev/null || true
 }
 
-pkg_build "Binutils Pass1"    "$(ls ${LFS}/sources/binutils-*.tar.*)"  do_binutils_p1
-pkg_build "GCC Pass1"         "$(ls ${LFS}/sources/gcc-*.tar.*)"       do_gcc_p1
-pkg_build "Linux API Headers" "$(ls ${LFS}/sources/linux-*.tar.*)"     do_linux_headers
-pkg_build "Glibc"             "$(ls ${LFS}/sources/glibc-*.tar.*)"     do_glibc
-pkg_build "Libstdc++"         "$(ls ${LFS}/sources/gcc-*.tar.*)"       do_libstdcpp
+pkg_build "Binutils Pass1"    "$(ls ${LFS}/sources/binutils-*.tar.* 2>/dev/null | head -1)"  do_binutils_p1
+pkg_build "GCC Pass1"         "$(ls ${LFS}/sources/gcc-*.tar.* 2>/dev/null | head -1)"       do_gcc_p1
+pkg_build "Linux API Headers" "$(ls ${LFS}/sources/linux-*.tar.* 2>/dev/null | head -1)"     do_linux_headers
+pkg_build "Glibc"             "$(ls ${LFS}/sources/glibc-*.tar.* 2>/dev/null | head -1)"     do_glibc
+pkg_build "Libstdc++"         "$(ls ${LFS}/sources/gcc-*.tar.* 2>/dev/null | head -1)"       do_libstdcpp
 
 echo "[TC] クロスツールチェーン完了"
 TCEOF
@@ -420,6 +460,11 @@ SRC="${LFS}/sources"
 
 tt_build() {
     local name="$1" tarball="$2" fn="$3"
+    if [[ -z "${tarball}" || ! -f "${tarball}" ]]; then
+        echo "[ERROR] tt_build ${name}: tarball が見つかりません: '${tarball:-<空>}'"
+        ls "${SRC}/" 2>/dev/null | head -20 || true
+        exit 1
+    fi
     echo "[TT] $(date '+%H:%M:%S') ${name}"
     cd "${SRC}"
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -436,7 +481,7 @@ do_m4() {
     ./configure --prefix=/usr --host="${LFS_TGT}" --build="$(build-aux/config.guess 2>/dev/null || config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "M4" "$(ls ${SRC}/m4-*.tar.*)" do_m4
+tt_build "M4" "$(ls ${SRC}/m4-*.tar.* 2>/dev/null | head -1)" do_m4
 
 # ── Ncurses ─────────────────────────────────────────────────
 do_ncurses() {
@@ -454,7 +499,7 @@ do_ncurses() {
     ln -sv libncursesw.so "${LFS}/usr/lib/libncurses.so"
     sed -e 's/^#if.*XOPEN.*$/#if 1/' -i "${LFS}/usr/include/curses.h" 2>/dev/null || true
 }
-tt_build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.*)" do_ncurses
+tt_build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
 
 # ── Bash ────────────────────────────────────────────────────
 do_bash() {
@@ -464,7 +509,7 @@ do_bash() {
     make && make DESTDIR="${LFS}" install
     ln -sv bash "${LFS}/bin/sh" 2>/dev/null || true
 }
-tt_build "Bash" "$(ls ${SRC}/bash-*.tar.*)" do_bash
+tt_build "Bash" "$(ls ${SRC}/bash-*.tar.* 2>/dev/null | head -1)" do_bash
 
 # ── Coreutils ───────────────────────────────────────────────
 do_coreutils() {
@@ -479,7 +524,7 @@ do_coreutils() {
           "${LFS}/usr/share/man/man8/chroot.8" 2>/dev/null || true
     sed -i 's/"1"/"8"/' "${LFS}/usr/share/man/man8/chroot.8" 2>/dev/null || true
 }
-tt_build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.*)" do_coreutils
+tt_build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_coreutils
 
 # ── Diffutils ───────────────────────────────────────────────
 do_diffutils() {
@@ -487,7 +532,7 @@ do_diffutils() {
         --build="$(./build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Diffutils" "$(ls ${SRC}/diffutils-*.tar.*)" do_diffutils
+tt_build "Diffutils" "$(ls ${SRC}/diffutils-*.tar.* 2>/dev/null | head -1)" do_diffutils
 
 # ── File ────────────────────────────────────────────────────
 do_file() {
@@ -502,7 +547,7 @@ do_file() {
     make DESTDIR="${LFS}" install
     rm -v "${LFS}/usr/lib/libmagic.la" 2>/dev/null || true
 }
-tt_build "File" "$(ls ${SRC}/file-*.tar.*)" do_file
+tt_build "File" "$(ls ${SRC}/file-*.tar.* 2>/dev/null | head -1)" do_file
 
 # ── Findutils ───────────────────────────────────────────────
 do_findutils() {
@@ -510,7 +555,7 @@ do_findutils() {
         --host="${LFS_TGT}" --build="$(build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Findutils" "$(ls ${SRC}/findutils-*.tar.*)" do_findutils
+tt_build "Findutils" "$(ls ${SRC}/findutils-*.tar.* 2>/dev/null | head -1)" do_findutils
 
 # ── Gawk ────────────────────────────────────────────────────
 do_gawk() {
@@ -519,7 +564,7 @@ do_gawk() {
         --build="$(build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Gawk" "$(ls ${SRC}/gawk-*.tar.*)" do_gawk
+tt_build "Gawk" "$(ls ${SRC}/gawk-*.tar.* 2>/dev/null | head -1)" do_gawk
 
 # ── Grep ────────────────────────────────────────────────────
 do_grep() {
@@ -527,14 +572,14 @@ do_grep() {
         --build="$(./build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Grep" "$(ls ${SRC}/grep-*.tar.*)" do_grep
+tt_build "Grep" "$(ls ${SRC}/grep-*.tar.* 2>/dev/null | head -1)" do_grep
 
 # ── Gzip ────────────────────────────────────────────────────
 do_gzip() {
     ./configure --prefix=/usr --host="${LFS_TGT}"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Gzip" "$(ls ${SRC}/gzip-*.tar.*)" do_gzip
+tt_build "Gzip" "$(ls ${SRC}/gzip-*.tar.* 2>/dev/null | head -1)" do_gzip
 
 # ── Make ────────────────────────────────────────────────────
 do_make() {
@@ -542,7 +587,7 @@ do_make() {
         --host="${LFS_TGT}" --build="$(build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Make" "$(ls ${SRC}/make-*.tar.*)" do_make
+tt_build "Make" "$(ls ${SRC}/make-*.tar.* 2>/dev/null | head -1)" do_make
 
 # ── Patch ───────────────────────────────────────────────────
 do_patch() {
@@ -550,7 +595,7 @@ do_patch() {
         --build="$(build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Patch" "$(ls ${SRC}/patch-*.tar.*)" do_patch
+tt_build "Patch" "$(ls ${SRC}/patch-*.tar.* 2>/dev/null | head -1)" do_patch
 
 # ── Sed ─────────────────────────────────────────────────────
 do_sed() {
@@ -558,7 +603,7 @@ do_sed() {
         --build="$(./build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Sed" "$(ls ${SRC}/sed-*.tar.*)" do_sed
+tt_build "Sed" "$(ls ${SRC}/sed-*.tar.* 2>/dev/null | head -1)" do_sed
 
 # ── Tar ─────────────────────────────────────────────────────
 do_tar() {
@@ -566,7 +611,7 @@ do_tar() {
         --build="$(build-aux/config.guess)"
     make && make DESTDIR="${LFS}" install
 }
-tt_build "Tar" "$(ls ${SRC}/tar-*.tar.*)" do_tar
+tt_build "Tar" "$(ls ${SRC}/tar-*.tar.* 2>/dev/null | head -1)" do_tar
 
 # ── Xz ──────────────────────────────────────────────────────
 do_xz() {
@@ -576,7 +621,7 @@ do_xz() {
     make && make DESTDIR="${LFS}" install
     rm -v "${LFS}/usr/lib/liblzma.la" 2>/dev/null || true
 }
-tt_build "Xz" "$(ls ${SRC}/xz-*.tar.*)" do_xz
+tt_build "Xz" "$(ls ${SRC}/xz-*.tar.* 2>/dev/null | head -1)" do_xz
 
 # ── Binutils Pass2 ──────────────────────────────────────────
 do_binutils_p2() {
@@ -590,7 +635,7 @@ do_binutils_p2() {
     make && make DESTDIR="${LFS}" install
     rm -v "${LFS}"/usr/lib/lib{bfd,ctf,ctf-nobfd,opcodes,sframe}.{a,la} 2>/dev/null || true
 }
-tt_build "Binutils Pass2" "$(ls ${SRC}/binutils-*.tar.*)" do_binutils_p2
+tt_build "Binutils Pass2" "$(ls ${SRC}/binutils-*.tar.* 2>/dev/null | head -1)" do_binutils_p2
 
 # ── GCC Pass2 ───────────────────────────────────────────────
 do_gcc_p2() {
@@ -613,7 +658,7 @@ do_gcc_p2() {
     make && make DESTDIR="${LFS}" install
     ln -sv gcc "${LFS}/usr/bin/cc" 2>/dev/null || true
 }
-tt_build "GCC Pass2" "$(ls ${SRC}/gcc-*.tar.*)" do_gcc_p2
+tt_build "GCC Pass2" "$(ls ${SRC}/gcc-*.tar.* 2>/dev/null | head -1)" do_gcc_p2
 
 echo "[TT] 一時ツール群ビルド完了"
 TTEOF
@@ -652,6 +697,11 @@ SRC=/sources
 
 build() {
     local name="$1" tarball="$2" fn="$3"
+    if [[ -z "${tarball}" || ! -f "${SRC}/${tarball}" && ! -f "${tarball}" ]]; then
+        echo "[ERROR] build ${name}: tarball が見つかりません: '${tarball:-<空>}'"
+        ls "${SRC}/" 2>/dev/null | head -20 || true
+        exit 1
+    fi
     echo "[BASE] $(date '+%H:%M:%S') ${name}"
     cd "${SRC}"
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -709,11 +759,11 @@ chmod 600   /var/log/btmp
 
 # ── Man-pages ───────────────────────────────────────────────
 do_manpages() { make prefix=/usr install; }
-build "Man-pages" "$(ls ${SRC}/man-pages-*.tar.*)" do_manpages
+build "Man-pages" "$(ls ${SRC}/man-pages-*.tar.* 2>/dev/null | head -1)" do_manpages
 
 # ── Iana-etc ────────────────────────────────────────────────
 do_iana() { cp services protocols /etc/; }
-build "Iana-etc" "$(ls ${SRC}/iana-etc-*.tar.*)" do_iana
+build "Iana-etc" "$(ls ${SRC}/iana-etc-*.tar.* 2>/dev/null | head -1)" do_iana
 
 # ── Glibc (final) ───────────────────────────────────────────
 do_glibc_final() {
@@ -756,7 +806,7 @@ NSSEOF
 /opt/lib
 LDEOF
 }
-build "Glibc-final" "$(ls ${SRC}/glibc-*.tar.*)" do_glibc_final
+build "Glibc-final" "$(ls ${SRC}/glibc-*.tar.* 2>/dev/null | head -1)" do_glibc_final
 
 # ── Zlib ────────────────────────────────────────────────────
 do_zlib() {
@@ -764,7 +814,7 @@ do_zlib() {
     make && make install
     rm -fv /usr/lib/libz.a
 }
-build "Zlib" "$(ls ${SRC}/zlib-*.tar.*)" do_zlib
+build "Zlib" "$(ls ${SRC}/zlib-*.tar.* 2>/dev/null | head -1)" do_zlib
 
 # ── Bzip2 ───────────────────────────────────────────────────
 do_bzip2() {
@@ -779,7 +829,7 @@ do_bzip2() {
     for i in /usr/bin/{bzcat,bunzip2}; do ln -sfv bzip2 ${i}; done
     rm -fv /usr/lib/libbz2.a
 }
-build "Bzip2" "$(ls ${SRC}/bzip2-*.tar.*)" do_bzip2
+build "Bzip2" "$(ls ${SRC}/bzip2-*.tar.* 2>/dev/null | head -1)" do_bzip2
 
 # ── Xz ──────────────────────────────────────────────────────
 do_xz() {
@@ -787,22 +837,22 @@ do_xz() {
         --docdir=/usr/share/doc/xz-5.6
     make && make install
 }
-build "Xz" "$(ls ${SRC}/xz-*.tar.*)" do_xz
+build "Xz" "$(ls ${SRC}/xz-*.tar.* 2>/dev/null | head -1)" do_xz
 
 # ── Lz4 ─────────────────────────────────────────────────────
 do_lz4() { make BUILD_STATIC=no PREFIX=/usr && make BUILD_STATIC=no PREFIX=/usr install; }
-build "Lz4" "$(ls ${SRC}/lz4-*.tar.*)" do_lz4
+build "Lz4" "$(ls ${SRC}/lz4-*.tar.* 2>/dev/null | head -1)" do_lz4
 
 # ── Zstd ────────────────────────────────────────────────────
 do_zstd() {
     make prefix=/usr && make prefix=/usr install
     rm -v /usr/lib/libzstd.a
 }
-build "Zstd" "$(ls ${SRC}/zstd-*.tar.*)" do_zstd
+build "Zstd" "$(ls ${SRC}/zstd-*.tar.* 2>/dev/null | head -1)" do_zstd
 
 # ── File ────────────────────────────────────────────────────
 do_file() { ./configure --prefix=/usr && make && make install; }
-build "File" "$(ls ${SRC}/file-*.tar.*)" do_file
+build "File" "$(ls ${SRC}/file-*.tar.* 2>/dev/null | head -1)" do_file
 
 # ── Readline ────────────────────────────────────────────────
 do_readline() {
@@ -813,7 +863,7 @@ do_readline() {
     make SHLIB_LIBS="-lncursesw"
     make SHLIB_LIBS="-lncursesw" install
 }
-build "Readline" "$(ls ${SRC}/readline-*.tar.*)" do_readline
+build "Readline" "$(ls ${SRC}/readline-*.tar.* 2>/dev/null | head -1)" do_readline
 
 # ── M4 / Bc / Flex ──────────────────────────────────────────
 for pkg in m4 bc flex; do
@@ -845,7 +895,7 @@ do_tcl() {
     make install-private-headers
     ln -sfv tclsh8.6 /usr/bin/tclsh
 }
-build "Tcl" "$(ls ${SRC}/tcl*-src.tar.*)" do_tcl
+build "Tcl" "$(ls ${SRC}/tcl*-src.tar.* 2>/dev/null | head -1)" do_tcl
 
 do_expect() {
     ./configure --prefix=/usr --with-tcl=/usr/lib \
@@ -853,21 +903,21 @@ do_expect() {
         --mandir=/usr/share/man --with-tclinclude=/usr/include
     make && make install
 }
-build "Expect" "$(ls ${SRC}/expect*.tar.*)" do_expect
+build "Expect" "$(ls ${SRC}/expect*.tar.* 2>/dev/null | head -1)" do_expect
 
 do_dejagnu() {
     mkdir build && cd build
     ../configure --prefix=/usr
     make install
 }
-build "DejaGNU" "$(ls ${SRC}/dejagnu-*.tar.*)" do_dejagnu
+build "DejaGNU" "$(ls ${SRC}/dejagnu-*.tar.* 2>/dev/null | head -1)" do_dejagnu
 
 do_pkgconf() {
     ./configure --prefix=/usr --disable-static --docdir=/usr/share/doc/pkgconf-2.3.0
     make && make install
     ln -sv pkgconf /usr/bin/pkg-config
 }
-build "Pkgconf" "$(ls ${SRC}/pkgconf-*.tar.*)" do_pkgconf
+build "Pkgconf" "$(ls ${SRC}/pkgconf-*.tar.* 2>/dev/null | head -1)" do_pkgconf
 
 # ── Binutils (final) ────────────────────────────────────────
 do_binutils_final() {
@@ -880,7 +930,7 @@ do_binutils_final() {
     make tooldir=/usr && make tooldir=/usr install
     rm -fv /usr/lib/lib{bfd,ctf,ctf-nobfd,gprofng,opcodes,sframe}.a
 }
-build "Binutils-final" "$(ls ${SRC}/binutils-*.tar.*)" do_binutils_final
+build "Binutils-final" "$(ls ${SRC}/binutils-*.tar.* 2>/dev/null | head -1)" do_binutils_final
 
 # ── GMP / MPFR / MPC ────────────────────────────────────────
 do_gmp() {
@@ -888,21 +938,21 @@ do_gmp() {
         --docdir=/usr/share/doc/gmp-6.3.0
     make && make install
 }
-build "GMP" "$(ls ${SRC}/gmp-*.tar.*)" do_gmp
+build "GMP" "$(ls ${SRC}/gmp-*.tar.* 2>/dev/null | head -1)" do_gmp
 
 do_mpfr() {
     ./configure --prefix=/usr --disable-static \
         --enable-thread-safe --docdir=/usr/share/doc/mpfr-4.2.1
     make && make install
 }
-build "MPFR" "$(ls ${SRC}/mpfr-*.tar.*)" do_mpfr
+build "MPFR" "$(ls ${SRC}/mpfr-*.tar.* 2>/dev/null | head -1)" do_mpfr
 
 do_mpc() {
     ./configure --prefix=/usr --disable-static \
         --docdir=/usr/share/doc/mpc-1.3.1
     make && make install
 }
-build "MPC" "$(ls ${SRC}/mpc-*.tar.*)" do_mpc
+build "MPC" "$(ls ${SRC}/mpc-*.tar.* 2>/dev/null | head -1)" do_mpc
 
 # ── Attr / Acl / Libcap / Libxcrypt ────────────────────────
 do_attr() {
@@ -910,20 +960,20 @@ do_attr() {
         --docdir=/usr/share/doc/attr-2.5.2
     make && make install
 }
-build "Attr" "$(ls ${SRC}/attr-*.tar.*)" do_attr
+build "Attr" "$(ls ${SRC}/attr-*.tar.* 2>/dev/null | head -1)" do_attr
 
 do_acl() {
     ./configure --prefix=/usr --disable-static \
         --docdir=/usr/share/doc/acl-2.3.2
     make && make install
 }
-build "Acl" "$(ls ${SRC}/acl-*.tar.*)" do_acl
+build "Acl" "$(ls ${SRC}/acl-*.tar.* 2>/dev/null | head -1)" do_acl
 
 do_libcap() {
     sed -i '/install -m.*STA/d' libcap/Makefile
     make prefix=/usr lib=lib && make prefix=/usr lib=lib install
 }
-build "Libcap" "$(ls ${SRC}/libcap-*.tar.*)" do_libcap
+build "Libcap" "$(ls ${SRC}/libcap-*.tar.* 2>/dev/null | head -1)" do_libcap
 
 do_libxcrypt() {
     ./configure --prefix=/usr --enable-hashes=strong,glibc \
@@ -931,7 +981,7 @@ do_libxcrypt() {
         --disable-failure-tokens
     make && make install
 }
-build "Libxcrypt" "$(ls ${SRC}/libxcrypt-*.tar.*)" do_libxcrypt
+build "Libxcrypt" "$(ls ${SRC}/libxcrypt-*.tar.* 2>/dev/null | head -1)" do_libxcrypt
 
 # ── Shadow ──────────────────────────────────────────────────
 do_shadow() {
@@ -954,7 +1004,7 @@ do_shadow() {
     useradd -D --gid 999
     sed -i '/MAIL/s/yes/no/' /etc/default/useradd
 }
-build "Shadow" "$(ls ${SRC}/shadow-*.tar.*)" do_shadow
+build "Shadow" "$(ls ${SRC}/shadow-*.tar.* 2>/dev/null | head -1)" do_shadow
 
 # ── GCC (final) ─────────────────────────────────────────────
 do_gcc_final() {
@@ -975,7 +1025,7 @@ do_gcc_final() {
     mkdir -pv /usr/share/gdb/auto-load/usr/lib
     mv -v /usr/lib/*gdb.py /usr/share/gdb/auto-load/usr/lib 2>/dev/null || true
 }
-build "GCC-final" "$(ls ${SRC}/gcc-*.tar.*)" do_gcc_final
+build "GCC-final" "$(ls ${SRC}/gcc-*.tar.* 2>/dev/null | head -1)" do_gcc_final
 
 # ── Ncurses ─────────────────────────────────────────────────
 do_ncurses() {
@@ -991,7 +1041,7 @@ do_ncurses() {
     done
     ln -sfv libncursesw.so /usr/lib/libcurses.so
 }
-build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.*)" do_ncurses
+build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
 
 # ── Sed / Psmisc / Gettext / Bison / Grep ───────────────────
 for pkg in sed psmisc gettext bison grep; do
@@ -1013,7 +1063,7 @@ do_bash() {
     make && make install
     ln -sfv bash /usr/bin/sh
 }
-build "Bash" "$(ls ${SRC}/bash-*.tar.*)" do_bash
+build "Bash" "$(ls ${SRC}/bash-*.tar.* 2>/dev/null | head -1)" do_bash
 
 # ── Libtool / GDBM / Gperf / Expat / Inetutils / Less ──────
 for pkg in libtool gdbm gperf expat inetutils less; do
@@ -1050,16 +1100,16 @@ do_perl() {
         -D usethreads
     make && make install
 }
-build "Perl" "$(ls ${SRC}/perl-*.tar.*)" do_perl
+build "Perl" "$(ls ${SRC}/perl-*.tar.* 2>/dev/null | head -1)" do_perl
 
 do_xmlparser() { perl Makefile.PL && make && make install; }
-build "XML::Parser" "$(ls ${SRC}/XML-Parser-*.tar.*)" do_xmlparser
+build "XML::Parser" "$(ls ${SRC}/XML-Parser-*.tar.* 2>/dev/null | head -1)" do_xmlparser
 
 do_intltool() {
     sed -i 's:\\\${:\\\$\\{:' intltool-update.in
     ./configure --prefix=/usr && make && make install
 }
-build "Intltool" "$(ls ${SRC}/intltool-*.tar.*)" do_intltool
+build "Intltool" "$(ls ${SRC}/intltool-*.tar.* 2>/dev/null | head -1)" do_intltool
 
 for pkg in autoconf automake; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
@@ -1077,7 +1127,7 @@ do_openssl() {
     make && sed -i '/INSTALL_LIBS/s/libcrypto.a libssl.a//' Makefile
     make MANSUFFIX=ssl install
 }
-build "OpenSSL" "$(ls ${SRC}/openssl-*.tar.*)" do_openssl
+build "OpenSSL" "$(ls ${SRC}/openssl-*.tar.* 2>/dev/null | head -1)" do_openssl
 
 # ── Kmod / Libelf / Libffi / Python ─────────────────────────
 do_kmod() {
@@ -1090,7 +1140,7 @@ do_kmod() {
     done
     ln -sfv kmod /usr/bin/lsmod
 }
-build "Kmod" "$(ls ${SRC}/kmod-*.tar.*)" do_kmod
+build "Kmod" "$(ls ${SRC}/kmod-*.tar.* 2>/dev/null | head -1)" do_kmod
 
 do_libelf() {
     ./configure --prefix=/usr --disable-debuginfod --enable-libdebuginfod=dummy
@@ -1098,13 +1148,13 @@ do_libelf() {
     install -vm644 config/libelf.pc /usr/lib/pkgconfig
     rm /usr/lib/libelf.a
 }
-build "Libelf" "$(ls ${SRC}/elfutils-*.tar.*)" do_libelf
+build "Libelf" "$(ls ${SRC}/elfutils-*.tar.* 2>/dev/null | head -1)" do_libelf
 
 do_libffi() {
     ./configure --prefix=/usr --disable-static --with-gcc-arch=native
     make && make install
 }
-build "Libffi" "$(ls ${SRC}/libffi-*.tar.*)" do_libffi
+build "Libffi" "$(ls ${SRC}/libffi-*.tar.* 2>/dev/null | head -1)" do_libffi
 
 do_python() {
     ./configure --prefix=/usr --enable-shared \
@@ -1112,17 +1162,17 @@ do_python() {
     make && make install
     ln -sfv python3 /usr/bin/python
 }
-build "Python" "$(ls ${SRC}/Python-*.tar.*)" do_python
+build "Python" "$(ls ${SRC}/Python-*.tar.* 2>/dev/null | head -1)" do_python
 
 # ── Ninja / Meson ────────────────────────────────────────────
 do_ninja() {
     python3 configure.py --bootstrap
     install -vm755 ninja /usr/bin/
 }
-build "Ninja" "$(ls ${SRC}/ninja-*.tar.*)" do_ninja
+build "Ninja" "$(ls ${SRC}/ninja-*.tar.* 2>/dev/null | head -1)" do_ninja
 
 do_meson() { pip3 install --no-build-isolation --no-index . 2>/dev/null || python3 setup.py install --optimize=1; }
-build "Meson" "$(ls ${SRC}/meson-*.tar.*)" do_meson
+build "Meson" "$(ls ${SRC}/meson-*.tar.* 2>/dev/null | head -1)" do_meson
 
 # ── Coreutils ───────────────────────────────────────────────
 do_coreutils() {
@@ -1133,7 +1183,7 @@ do_coreutils() {
     make && make install
     mv -v /usr/bin/chroot /usr/sbin
 }
-build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.*)" do_coreutils
+build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_coreutils
 
 # ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo / Which / Vim
 for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which vim; do
@@ -1180,7 +1230,7 @@ do_udev() {
     ninja udevadm systemd-hwdb
     DESTDIR=/ ninja install
 }
-build "Udev(systemd)" "$(ls ${SRC}/systemd-*.tar.*)" do_udev
+build "Udev(systemd)" "$(ls ${SRC}/systemd-*.tar.* 2>/dev/null | head -1)" do_udev
 
 # ── Man-DB / Procps-ng / Util-linux / E2fsprogs / SysVinit ─
 do_mandb() {
@@ -1189,13 +1239,13 @@ do_mandb() {
         --with-systemdtmpfilesdir= --with-systemdsystemunitdir=
     make && make install
 }
-build "Man-DB" "$(ls ${SRC}/man-db-*.tar.*)" do_mandb
+build "Man-DB" "$(ls ${SRC}/man-db-*.tar.* 2>/dev/null | head -1)" do_mandb
 
 do_procps() {
     ./configure --prefix=/usr --disable-static --disable-kill
     make && make install
 }
-build "Procps-ng" "$(ls ${SRC}/procps-ng-*.tar.*)" do_procps
+build "Procps-ng" "$(ls ${SRC}/procps-ng-*.tar.* 2>/dev/null | head -1)" do_procps
 
 do_utillinux() {
     mkdir -pv /var/lib/hwclock
@@ -1211,7 +1261,7 @@ do_utillinux() {
         --docdir=/usr/share/doc/util-linux-2.40.2
     make && make install
 }
-build "Util-linux" "$(ls ${SRC}/util-linux-*.tar.*)" do_utillinux
+build "Util-linux" "$(ls ${SRC}/util-linux-*.tar.* 2>/dev/null | head -1)" do_utillinux
 
 do_e2fsprogs() {
     mkdir build && cd build
@@ -1221,13 +1271,13 @@ do_e2fsprogs() {
     make && make install
     rm -fv /usr/lib/{libcom_err,libe2p,libext2fs,libss}.a
 }
-build "E2fsprogs" "$(ls ${SRC}/e2fsprogs-*.tar.*)" do_e2fsprogs
+build "E2fsprogs" "$(ls ${SRC}/e2fsprogs-*.tar.* 2>/dev/null | head -1)" do_e2fsprogs
 
 do_sysvinit() {
     patch -Np1 -i ../sysvinit-*.patch 2>/dev/null || true
     make && make install
 }
-build "SysVinit" "$(ls ${SRC}/sysvinit-*.tar.*)" do_sysvinit
+build "SysVinit" "$(ls ${SRC}/sysvinit-*.tar.* 2>/dev/null | head -1)" do_sysvinit
 
 echo ""
 echo "[BASE] LFS base システムビルド完了"
