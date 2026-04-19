@@ -553,7 +553,7 @@ do_ncurses() {
         --with-cxx-shared --without-debug --without-ada \
         --disable-stripping
     make && make DESTDIR="${LFS}" TIC_PATH="${LFS}/sources/ncurses-*/build/progs/tic" install
-    ln -sv libncursesw.so "${LFS}/usr/lib/libncurses.so"
+    ln -sfv libncursesw.so "${LFS}/usr/lib/libncurses.so"
     sed -e 's/^#if.*XOPEN.*$/#if 1/' -i "${LFS}/usr/include/curses.h" 2>/dev/null || true
 }
 tt_build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
@@ -564,7 +564,7 @@ do_bash() {
         --host="${LFS_TGT}" --without-bash-malloc \
         bash_cv_strtold_broken=no
     make && make DESTDIR="${LFS}" install
-    ln -sv bash "${LFS}/bin/sh" 2>/dev/null || true
+    ln -sfv bash "${LFS}/bin/sh" 2>/dev/null || true
 }
 tt_build "Bash" "$(ls ${SRC}/bash-*.tar.* 2>/dev/null | head -1)" do_bash
 
@@ -713,7 +713,7 @@ do_gcc_p2() {
         --disable-libgomp --disable-libquadmath --disable-libsanitizer \
         --disable-libssp --disable-libvtv --enable-languages=c,c++
     make && make DESTDIR="${LFS}" install
-    ln -sv gcc "${LFS}/usr/bin/cc" 2>/dev/null || true
+    ln -sfv gcc "${LFS}/usr/bin/cc" 2>/dev/null || true
 }
 tt_build "GCC Pass2" "$(ls ${SRC}/gcc-*.tar.* 2>/dev/null | head -1)" do_gcc_p2
 
@@ -908,7 +908,7 @@ do_bzip2() {
     make -f Makefile-libbz2_so && make clean
     make && make PREFIX=/usr install
     cp -av libbz2.so.* /usr/lib
-    ln -sv libbz2.so.1.0.8 /usr/lib/libbz2.so
+    ln -sfv libbz2.so.1.0.8 /usr/lib/libbz2.so
     cp -v bzip2-shared /usr/bin/bzip2
     for i in /usr/bin/{bzcat,bunzip2}; do ln -sfv bzip2 ${i}; done
     rm -fv /usr/lib/libbz2.a
@@ -963,7 +963,7 @@ for pkg in m4 bc flex; do
         ./configure --prefix=/usr
     fi
     make && make install
-    [[ "$pkg" == "flex" ]] && { ln -sv flex /usr/bin/lex; ln -sv flex.1 /usr/share/man/man1/lex.1; } || true
+    [[ "$pkg" == "flex" ]] && { ln -sfv flex /usr/bin/lex; ln -sfv flex.1 /usr/share/man/man1/lex.1; } || true
     cd ${SRC} && rm -rf "$dir"
 done
 
@@ -1024,7 +1024,7 @@ build "DejaGNU" "$(ls ${SRC}/dejagnu-*.tar.* 2>/dev/null | head -1)" do_dejagnu
 do_pkgconf() {
     ./configure --prefix=/usr --disable-static --docdir=/usr/share/doc/pkgconf-2.3.0
     make && make install
-    ln -sv pkgconf /usr/bin/pkg-config
+    ln -sfv pkgconf /usr/bin/pkg-config
 }
 build "Pkgconf" "$(ls ${SRC}/pkgconf-*.tar.* 2>/dev/null | head -1)" do_pkgconf
 
@@ -1128,7 +1128,7 @@ do_gcc_final() {
     make && make install
     chown -v -R root:root /usr/lib/gcc/$(gcc -dumpmachine)/*/include{,-fixed}
     ln -svr /usr/bin/cpp /usr/lib
-    ln -sv gcc.1 /usr/share/man/man1/cc.1
+    ln -sfv gcc.1 /usr/share/man/man1/cc.1
     ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/*/liblto_plugin.so \
         /usr/lib/bfd-plugins/
     mkdir -pv /usr/share/gdb/auto-load/usr/lib
@@ -1305,7 +1305,7 @@ for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which vim; 
         echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
         ./configure --prefix=/usr
         make && make install
-        ln -sv vim /usr/bin/vi
+        ln -sfv vim /usr/bin/vi
         cat > /etc/vimrc << 'VIMEOF'
 set nocompatible
 set backspace=2
