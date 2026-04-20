@@ -1159,7 +1159,7 @@ do_gcc_final() {
         --with-system-zlib
     make && make install
     chown -v -R root:root /usr/lib/gcc/$(gcc -dumpmachine)/*/include{,-fixed}
-    ln -svr /usr/bin/cpp /usr/lib
+    ln -sfvr /usr/bin/cpp /usr/lib
     ln -sfv gcc.1 /usr/share/man/man1/cc.1
     ln -sfv ../../libexec/gcc/$(gcc -dumpmachine)/*/liblto_plugin.so \
         /usr/lib/bfd-plugins/
