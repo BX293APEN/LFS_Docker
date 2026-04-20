@@ -41,6 +41,7 @@ _load_pkg_override() {
 }
 # wget-list に含まれうるパッケージと対応する CLI_URL_* を登録
 _load_pkg_override "expat-2.6.2.tar.xz"             "CLI_URL_EXPAT"
+_load_pkg_override "libpipeline-1.5.0.tar.gz"        "CLI_URL_LIBPIPELINE"
 _load_pkg_override "sudo-1.9.15p5.tar.gz"            "CLI_URL_SUDO"
 _load_pkg_override "nano-8.3.tar.xz"                 "CLI_URL_NANO"
 _load_pkg_override "curl-8.11.1.tar.xz"              "CLI_URL_CURL"
@@ -298,6 +299,13 @@ if ! flagged step2_sources; then
         log_info "expat-2.6.2.tar.xz を取得中..."
         read -ra _URL_EXPAT_S2 <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
         smart_wget "expat-2.6.2.tar.xz" "${_URL_EXPAT_S2[@]}" || true
+    fi
+
+    # ── libpipeline フォールバック（man-db の必須依存ライブラリ）────────────
+    if [[ ! -s "libpipeline-1.5.0.tar.gz" ]]; then
+        log_info "libpipeline-1.5.0.tar.gz を取得中..."
+        read -ra _URL_LIBPIPELINE_S2 <<< "${CLI_URL_LIBPIPELINE:-https://download.savannah.gnu.org/releases/libpipeline/libpipeline-1.5.0.tar.gz https://www.linuxfromscratch.org/lfs/downloads/12.2/libpipeline-1.5.0.tar.gz}"
+        smart_wget "libpipeline-1.5.0.tar.gz" "${_URL_LIBPIPELINE_S2[@]}" || true
     fi
 
     # ── expect gcc14 パッチ フォールバック ──────────────────────────────────
@@ -948,17 +956,6 @@ build "Zstd" "$(ls ${SRC}/zstd-*.tar.* 2>/dev/null | head -1)" do_zstd
 do_file() { ./configure --prefix=/usr && make && make install; }
 build "File" "$(ls ${SRC}/file-*.tar.* 2>/dev/null | head -1)" do_file
 
-# ── Readline ────────────────────────────────────────────────
-do_readline() {
-    sed -i '/MV.*old/d' Makefile.in
-    sed -i '/{OLDSUFF}/c:' support/shlib-install
-    ./configure --prefix=/usr --disable-static \
-        --with-curses --docdir=/usr/share/doc/readline-8.2
-    make SHLIB_LIBS="-lncursesw"
-    make SHLIB_LIBS="-lncursesw" install
-}
-build "Readline" "$(ls ${SRC}/readline-*.tar.* 2>/dev/null | head -1)" do_readline
-
 # ── M4 / Bc / Flex ──────────────────────────────────────────
 for pkg in m4 bc flex; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
@@ -1183,6 +1180,17 @@ do_ncurses() {
     ln -sfv libncursesw.so /usr/lib/libcurses.so
 }
 build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
+
+# ── Readline (Ncurses-final の後にビルド: libncursesw.so が必須) ─────────
+do_readline() {
+    sed -i '/MV.*old/d' Makefile.in
+    sed -i '/{OLDSUFF}/c:' support/shlib-install
+    ./configure --prefix=/usr --disable-static \
+        --with-curses --docdir=/usr/share/doc/readline-8.2
+    make SHLIB_LIBS="-lncursesw"
+    make SHLIB_LIBS="-lncursesw" install
+}
+build "Readline" "$(ls ${SRC}/readline-*.tar.* 2>/dev/null | head -1)" do_readline
 
 # ── Sed / Psmisc / Gettext / Grep ──────────────────────────
 # ※ bison は Glibc-final の前に Bison-early としてビルド済みのため除外
@@ -1419,6 +1427,13 @@ do_udev() {
     DESTDIR=/ ninja install
 }
 build "Udev(systemd)" "$(ls ${SRC}/systemd-*.tar.* 2>/dev/null | head -1)" do_udev
+
+# ── Libpipeline (Man-DB の依存ライブラリ) ───────────────────
+do_libpipeline() {
+    ./configure --prefix=/usr
+    make && make install
+}
+build "Libpipeline" "$(ls ${SRC}/libpipeline-*.tar.* 2>/dev/null | head -1)" do_libpipeline
 
 # ── Man-DB / Procps-ng / E2fsprogs / SysVinit ─
 do_mandb() {
