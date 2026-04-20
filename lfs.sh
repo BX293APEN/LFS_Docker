@@ -970,7 +970,7 @@ build "Readline" "$(ls ${SRC}/readline-*.tar.* 2>/dev/null | head -1)" do_readli
 
 # ── M4 / Bc / Flex ──────────────────────────────────────────
 for pkg in m4 bc flex; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -1196,7 +1196,7 @@ build "Ncurses" "$(ls ${SRC}/ncurses-*.tar.* 2>/dev/null | head -1)" do_ncurses
 # ── Sed / Psmisc / Gettext / Grep ──────────────────────────
 # ※ bison は Glibc-final の前に Bison-early としてビルド済みのため除外
 for pkg in sed psmisc gettext grep; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -1220,7 +1220,7 @@ build "Bash" "$(ls ${SRC}/bash-*.tar.* 2>/dev/null | head -1)" do_bash
 
 # ── Libtool / GDBM / Gperf / Expat / Inetutils / Less ──────
 for pkg in libtool gdbm gperf expat inetutils less; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -1249,7 +1249,7 @@ do_intltool() {
 build "Intltool" "$(ls ${SRC}/intltool-*.tar.* 2>/dev/null | head -1)" do_intltool
 
 for pkg in autoconf automake; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -1332,11 +1332,9 @@ do_coreutils() {
 }
 build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_coreutils
 
-# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Which
-# vim は独自 configure の癖が多いため除外。エディタは step6 の nano を使用。
-
-for pkg in diffutils findutils gawk tar grep gzip patch make which; do
-    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
+# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make
+for pkg in diffutils findutils gawk tar grep gzip patch make; do
+    f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
@@ -1351,6 +1349,41 @@ for pkg in diffutils findutils gawk tar grep gzip patch make which; do
     cd ${SRC} && rm -rf "$dir"
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
+
+# ── Which (個別) ────────────────────────────────────────────
+_f=$(ls ${SRC}/which-*.tar.* 2>/dev/null | head -1 || true)
+if [[ -f "$_f" ]]; then
+    echo "[BASE] $(date '+%H:%M:%S') which 開始"
+    _dir=$(tar -tf "$_f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
+    cd ${SRC} && rm -rf "$_dir" && tar -xf "$_f" && cd "$_dir"
+    ./configure --prefix=/usr && make && make install
+    cd ${SRC} && rm -rf "$_dir"
+    echo "[BASE] $(date '+%H:%M:%S') which 完了"
+else
+    echo "[SKIP] which: tarball なし"
+fi
+
+# ── Vim (個別) ──────────────────────────────────────────────
+_f=$(ls ${SRC}/vim-*.tar.* 2>/dev/null | head -1 || true)
+if [[ -f "$_f" ]]; then
+    echo "[BASE] $(date '+%H:%M:%S') vim 開始"
+    _dir=$(tar -tf "$_f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
+    cd ${SRC} && rm -rf "$_dir" && tar -xf "$_f" && cd "$_dir"
+    echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
+    ./configure --prefix=/usr || {
+        echo "[WARN] vim configure 失敗、スキップします"
+        cd ${SRC} && rm -rf "$_dir"
+        _f=""
+    }
+    if [[ -f "$_f" ]]; then
+        make && make install
+        ln -sfv vim /usr/bin/vi 2>/dev/null || true
+        cd ${SRC} && rm -rf "$_dir"
+        echo "[BASE] $(date '+%H:%M:%S') vim 完了"
+    fi
+else
+    echo "[SKIP] vim: tarball なし"
+fi
 
 # ── Udev (systemd) ──────────────────────────────────────────
 do_udev() {
