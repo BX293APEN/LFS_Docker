@@ -42,6 +42,7 @@ _load_pkg_override() {
 # wget-list に含まれうるパッケージと対応する CLI_URL_* を登録
 _load_pkg_override "expat-2.6.2.tar.xz"             "CLI_URL_EXPAT"
 _load_pkg_override "libpipeline-1.5.0.tar.gz"        "CLI_URL_LIBPIPELINE"
+_load_pkg_override "groff-1.23.0.tar.gz"             "CLI_URL_GROFF"
 _load_pkg_override "sudo-1.9.15p5.tar.gz"            "CLI_URL_SUDO"
 _load_pkg_override "nano-8.3.tar.xz"                 "CLI_URL_NANO"
 _load_pkg_override "curl-8.11.1.tar.xz"              "CLI_URL_CURL"
@@ -311,9 +312,8 @@ if ! flagged step2_sources; then
     # ── groff フォールバック（man-db の soelim/tbl 依存）────────────────────
     if [[ ! -s "groff-1.23.0.tar.gz" ]]; then
         log_info "groff-1.23.0.tar.gz を取得中..."
-        smart_wget "groff-1.23.0.tar.gz" \
-            "https://ftp.gnu.org/gnu/groff/groff-1.23.0.tar.gz" \
-            "https://mirrors.kernel.org/gnu/groff/groff-1.23.0.tar.gz" || true
+        read -ra _URL_GROFF_S2 <<< "${CLI_URL_GROFF:-https://ftp.gnu.org/gnu/groff/groff-1.23.0.tar.gz https://mirrors.kernel.org/gnu/groff/groff-1.23.0.tar.gz https://ftpmirror.gnu.org/groff/groff-1.23.0.tar.gz}"
+        smart_wget "groff-1.23.0.tar.gz" "${_URL_GROFF_S2[@]}" || true
     fi
 
     # ── expect gcc14 パッチ フォールバック ──────────────────────────────────
