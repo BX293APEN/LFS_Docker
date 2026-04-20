@@ -1378,6 +1378,23 @@ else
     echo "[SKIP] vim: tarball なし"
 fi
 
+# ── Util-linux (libmount を Udev より先にビルド) ─────────────
+do_utillinux() {
+    mkdir -pv /var/lib/hwclock
+    ./configure --bindir=/usr/bin --libdir=/usr/lib \
+        --runstatedir=/run --sbindir=/usr/sbin \
+        --disable-chfn-chsh --disable-login \
+        --disable-nologin --disable-su \
+        --disable-setpriv --disable-runuser \
+        --disable-pylibmount --disable-static \
+        --disable-liblastlog2 --without-python \
+        --without-systemd --without-systemdsystemunitdir \
+        ADJTIME_PATH=/var/lib/hwclock/adjtime \
+        --docdir=/usr/share/doc/util-linux-2.40.2
+    make && make install
+}
+build "Util-linux" "$(ls ${SRC}/util-linux-*.tar.* 2>/dev/null | head -1)" do_utillinux
+
 # ── Udev (systemd) ──────────────────────────────────────────
 do_udev() {
     sed -i -e 's/GROUP="render"/GROUP="video"/' \
@@ -1399,7 +1416,7 @@ do_udev() {
 }
 build "Udev(systemd)" "$(ls ${SRC}/systemd-*.tar.* 2>/dev/null | head -1)" do_udev
 
-# ── Man-DB / Procps-ng / Util-linux / E2fsprogs / SysVinit ─
+# ── Man-DB / Procps-ng / E2fsprogs / SysVinit ─
 do_mandb() {
     ./configure --prefix=/usr --sysconfdir=/etc \
         --disable-setuid --enable-cache-owner=bin \
@@ -1413,22 +1430,6 @@ do_procps() {
     make && make install
 }
 build "Procps-ng" "$(ls ${SRC}/procps-ng-*.tar.* 2>/dev/null | head -1)" do_procps
-
-do_utillinux() {
-    mkdir -pv /var/lib/hwclock
-    ./configure --bindir=/usr/bin --libdir=/usr/lib \
-        --runstatedir=/run --sbindir=/usr/sbin \
-        --disable-chfn-chsh --disable-login \
-        --disable-nologin --disable-su \
-        --disable-setpriv --disable-runuser \
-        --disable-pylibmount --disable-static \
-        --disable-liblastlog2 --without-python \
-        --without-systemd --without-systemdsystemunitdir \
-        ADJTIME_PATH=/var/lib/hwclock/adjtime \
-        --docdir=/usr/share/doc/util-linux-2.40.2
-    make && make install
-}
-build "Util-linux" "$(ls ${SRC}/util-linux-*.tar.* 2>/dev/null | head -1)" do_utillinux
 
 do_e2fsprogs() {
     mkdir build && cd build
