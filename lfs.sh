@@ -308,6 +308,14 @@ if ! flagged step2_sources; then
         smart_wget "libpipeline-1.5.0.tar.gz" "${_URL_LIBPIPELINE_S2[@]}" || true
     fi
 
+    # ── groff フォールバック（man-db の soelim/tbl 依存）────────────────────
+    if [[ ! -s "groff-1.23.0.tar.gz" ]]; then
+        log_info "groff-1.23.0.tar.gz を取得中..."
+        smart_wget "groff-1.23.0.tar.gz" \
+            "https://ftp.gnu.org/gnu/groff/groff-1.23.0.tar.gz" \
+            "https://mirrors.kernel.org/gnu/groff/groff-1.23.0.tar.gz" || true
+    fi
+
     # ── expect gcc14 パッチ フォールバック ──────────────────────────────────
     # LFS 12.2 の wget-list に含まれているはずだが、取得できていない場合に補完する
     if [[ ! -s "expect-5.45.4-gcc14-1.patch" ]]; then
@@ -1434,6 +1442,13 @@ do_libpipeline() {
     make && make install
 }
 build "Libpipeline" "$(ls ${SRC}/libpipeline-*.tar.* 2>/dev/null | head -1)" do_libpipeline
+
+# ── Groff（man-db の soelim / tbl 依存）─────────────────────────────────────
+do_groff() {
+    PAGE=A4 ./configure --prefix=/usr
+    make && make install
+}
+build "Groff" "$(ls ${SRC}/groff-*.tar.* 2>/dev/null | head -1)" do_groff
 
 # ── Man-DB / Procps-ng / E2fsprogs / SysVinit ─
 do_mandb() {
