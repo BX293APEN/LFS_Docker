@@ -863,20 +863,13 @@ do_glibc_final() {
     ../configure --prefix=/usr --disable-werror \
         --enable-kernel=4.19 --enable-stack-protector=strong \
         --disable-nscd libc_cv_slibdir=/usr/lib
-    # test-installation.pl はホスト環境の libnss_dns / libnsl を要求するが、
-    # chroot内には存在しないためリンクエラーになる。
-    # LFSブック準拠の対処: Makefileからtest-installationターゲットをsedで除外する。
+    # まず make でビルド（この時点ではMakefileを触らない）
+    make
+    # make がMakefileを再生成した後に sed をかける。
+    # test-installation.pl は chroot内に libnss_files / libnss_dns / libnsl が
+    # 存在しないためリンクエラーになる。make install 直前に除外する。
     sed -i 's|/usr/bin/perl scripts/test-installation.pl $(DESTDIR)/||' Makefile
-    # 念のため chroot内(/usr/lib) と ホスト側マルチアーチパス の両方でリンクを試みる
-    for _libdir in /usr/lib /usr/lib/x86_64-linux-gnu; do
-        if [ -f "${_libdir}/libnss_dns.so.2" ] && [ ! -e "${_libdir}/libnss_dns.so" ]; then
-            ln -sv libnss_dns.so.2 "${_libdir}/libnss_dns.so"
-        fi
-        if [ -f "${_libdir}/libnsl.so.1" ] && [ ! -e "${_libdir}/libnsl.so" ]; then
-            ln -sv libnsl.so.1 "${_libdir}/libnsl.so"
-        fi
-    done
-    make && make install
+    make install
     sed '/RTLDLIST=/s@/usr@@g' -i /usr/bin/ldd
     mkdir -p /usr/lib/locale
     localedef -i ja_JP -f UTF-8 ja_JP.UTF-8 2>/dev/null || true
