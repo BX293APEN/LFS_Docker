@@ -1332,9 +1332,10 @@ do_coreutils() {
 }
 build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_coreutils
 
-# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo / Which
+# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Which
 # vim は独自 configure の癖が多いため除外。エディタは step6 の nano を使用。
-for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which; do
+# texinfo は install-info が chroot 環境で exit 2 を返すため個別ビルドに分離。
+for pkg in diffutils findutils gawk tar grep gzip patch make which; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
@@ -1350,6 +1351,16 @@ for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which; do
     cd ${SRC} && rm -rf "$dir"
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
+
+# ── Texinfo (個別ビルド) ─────────────────────────────────────
+# chroot 環境では make install 内の install-info が /usr/share/info/dir
+# を更新する際に exit 2 を返すことがある。|| true で無視して続行する。
+do_texinfo() {
+    ./configure --prefix=/usr
+    make
+    make install || true
+}
+build "Texinfo" "$(ls ${SRC}/texinfo-*.tar.* 2>/dev/null | head -1)" do_texinfo
 
 # ── Udev (systemd) ──────────────────────────────────────────
 do_udev() {
