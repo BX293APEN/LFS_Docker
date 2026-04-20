@@ -3,7 +3,7 @@
 寝ている間に Docker 上で LFS 12.2 をビルドし、朝起きたら USB に焼いてすぐ起動できるプロジェクトです。
 
 - **ベース**: Ubuntu 24.04 / LFS 12.2 (x86_64)
-- **ターゲット**: CLI 構成（sudo / nano / git / curl / wget / htop / tmux / tree / rsync / vim / bash-completion / openssh / iproute2 / dhcpcd）
+- **ターゲット**: CLI 構成（sudo / nano / git / curl / wget / htop / tmux / tree / rsync / bash-completion / openssh / iproute2 / dhcpcd）
 - **ブートローダー**: GRUB 2
 
 ---
