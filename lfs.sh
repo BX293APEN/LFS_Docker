@@ -1332,38 +1332,21 @@ do_coreutils() {
 }
 build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_coreutils
 
-# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo / Which / Vim
-for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which vim; do
+# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo / Which
+# vim は独自 configure の癖が多いため除外。エディタは step6 の nano を使用。
+for pkg in diffutils findutils gawk tar grep gzip patch make texinfo which; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
-    cd ${SRC} && tar -xf "$f" && cd "$dir"
-    if [[ "$pkg" == "vim" ]]; then
-        echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
-        ./configure --prefix=/usr \
-            --with-features=normal \
-            --without-x \
-            --disable-gui \
-            --disable-gpm \
-            --disable-sysmouse
-        make && make install
-        ln -sfv vim /usr/bin/vi
-        cat > /etc/vimrc << 'VIMEOF'
-set nocompatible
-set backspace=2
-set mouse-=a
-syntax on
-set ruler
-VIMEOF
-    else
-        timeout 120 ./configure --prefix=/usr || {
-            echo "[WARN] ${pkg} configure 失敗、スキップします"
-            cd ${SRC} && rm -rf "$dir"
-            continue
-        }
-        make && make install
-    fi
+    # 前回の失敗で残ったディレクトリを削除してからクリーンに展開する
+    cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
+    timeout 120 ./configure --prefix=/usr || {
+        echo "[WARN] ${pkg} configure 失敗、スキップします"
+        cd ${SRC} && rm -rf "$dir"
+        continue
+    }
+    make && make install
     cd ${SRC} && rm -rf "$dir"
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
