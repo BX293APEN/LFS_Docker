@@ -1393,7 +1393,6 @@ do_udev() {
         -D tmpfiles=false -D sysusers=false \
         -D hibernate=false -D ldconfig=false \
         -D resolve=false -D coredump=false \
-        -D pkgconfig.path=/usr/lib/pkgconfig \
         -D install-tests=false
     ninja udevadm systemd-hwdb
     DESTDIR=/ ninja install
