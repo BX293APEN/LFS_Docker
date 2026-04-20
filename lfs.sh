@@ -863,13 +863,11 @@ do_glibc_final() {
     ../configure --prefix=/usr --disable-werror \
         --enable-kernel=4.19 --enable-stack-protector=strong \
         --disable-nscd libc_cv_slibdir=/usr/lib
-    # まず make でビルド（この時点ではMakefileを触らない）
-    make
-    # make がMakefileを再生成した後に sed をかける。
-    # test-installation.pl は chroot内に libnss_files / libnss_dns / libnsl が
-    # 存在しないためリンクエラーになる。make install 直前に除外する。
-    sed -i 's|/usr/bin/perl scripts/test-installation.pl $(DESTDIR)/||' Makefile
-    make install
+    # test-installation.pl は chroot内に libnss_files 等が存在しないためリンクエラーになる。
+    # LFS Book 12.2公式手順: ソースルートの ../Makefile のtest-installation行をコメントアウト。
+    # (現在地は build/ サブディレクトリなので対象は ../Makefile)
+    sed '/test-installation/s/^/: #/' -i ../Makefile
+    make && make install
     sed '/RTLDLIST=/s@/usr@@g' -i /usr/bin/ldd
     mkdir -p /usr/lib/locale
     localedef -i ja_JP -f UTF-8 ja_JP.UTF-8 2>/dev/null || true
