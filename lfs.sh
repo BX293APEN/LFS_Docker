@@ -1398,11 +1398,11 @@ do_udev() {
         -D link-udev-shared=false -D logind=false \
         -D vconsole=false -D firstboot=false \
         -D randomseed=false -D backlight=false \
-        -D rfkill=false -D xdg-utils=false \
+        -D rfkill=false \
         -D tmpfiles=false -D sysusers=false \
         -D hibernate=false -D ldconfig=false \
         -D resolve=false -D coredump=false \
-        -D pkgconfig-path=/usr/lib/pkgconfig \
+        -D pkgconfig.path=/usr/lib/pkgconfig \
         -D install-tests=false
     ninja udevadm systemd-hwdb
     DESTDIR=/ ninja install
