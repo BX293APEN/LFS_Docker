@@ -1332,8 +1332,8 @@ do_coreutils() {
 }
 build "Coreutils" "$(ls ${SRC}/coreutils-*.tar.* 2>/dev/null | head -1)" do_coreutils
 
-# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make
-for pkg in diffutils findutils gawk tar grep gzip patch make; do
+# ── Diffutils / Findutils / Gawk / Tar / Grep / Gzip / Patch / Make / Texinfo
+for pkg in diffutils findutils gawk tar grep gzip patch make texinfo; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
@@ -1364,18 +1364,20 @@ else
 fi
 
 # ── Vim (個別) ──────────────────────────────────────────────
+# --disable-gui --without-x を明示して chroot 環境でのGUI検出を防ぐ
 _f=$(ls ${SRC}/vim-*.tar.* 2>/dev/null | head -1 || true)
 if [[ -f "$_f" ]]; then
     echo "[BASE] $(date '+%H:%M:%S') vim 開始"
     _dir=$(tar -tf "$_f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && rm -rf "$_dir" && tar -xf "$_f" && cd "$_dir"
     echo '#define SYS_VIMRC_FILE "/etc/vimrc"' >> src/feature.h
-    ./configure --prefix=/usr || {
+    _vim_ok=1
+    ./configure --prefix=/usr --disable-gui --without-x || {
         echo "[WARN] vim configure 失敗、スキップします"
         cd ${SRC} && rm -rf "$_dir"
-        _f=""
+        _vim_ok=0
     }
-    if [[ -f "$_f" ]]; then
+    if [[ $_vim_ok -eq 1 ]]; then
         make && make install
         ln -sfv vim /usr/bin/vi 2>/dev/null || true
         cd ${SRC} && rm -rf "$_dir"
