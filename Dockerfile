@@ -33,6 +33,7 @@ RUN apt update && \
         patch \
         perl \
         python3 \
+        python3-jinja2 \
         sed \
         tar \
         texinfo \

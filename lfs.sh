@@ -1397,6 +1397,10 @@ build "Util-linux" "$(ls ${SRC}/util-linux-*.tar.* 2>/dev/null | head -1)" do_ut
 
 # ── Udev (systemd) ──────────────────────────────────────────
 do_udev() {
+    # systemd-256以降のビルドにはjinja2が必須
+    # まずchroot内のpip3で試み、失敗してもDockerfileのpython3-jinja2で補完される
+    pip3 install jinja2 --quiet --break-system-packages 2>/dev/null || \
+    pip3 install jinja2 --quiet 2>/dev/null || true
     sed -i -e 's/GROUP="render"/GROUP="video"/' \
            -e 's/GROUP="sgx", //' rules.d/50-udev-default.rules.in
     sed -i -e '/systemd-sysctl/s/^/#/' rules.d/99-systemd.rules.in
