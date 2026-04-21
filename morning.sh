@@ -204,12 +204,17 @@ cp /etc/resolv.conf "$MOUNT_ROOT/etc/resolv.conf"
 echo "[INFO] $(date '+%Y-%m-%d %H:%M:%S') GRUB インストール中..."
 
 # GRUB がビルド済みかチェック
-if [[ ! -f "${MOUNT_ROOT}/usr/sbin/grub-install" ]]; then
+# GRUB 2.06+ では grub-install は /usr/bin/ に入る（/usr/sbin/ ではない）
+if [[ ! -f "${MOUNT_ROOT}/usr/bin/grub-install" ]] && \
+   [[ ! -f "${MOUNT_ROOT}/usr/sbin/grub-install" ]]; then
     echo "[WARN] GRUB が rootfs に含まれていません。"
     echo "  lfs.sh の chroot ビルドに sys-boot/grub のインストールを追加してください。"
     echo "  スキップして続行..."
 else
-    chroot "$MOUNT_ROOT" /bin/bash << 'GRUB_EOF'
+    chroot "$MOUNT_ROOT" /usr/bin/env -i \
+        HOME=/root \
+        PATH=/usr/bin:/usr/sbin:/bin:/sbin \
+        /bin/bash << 'GRUB_EOF'
 set -e
 grub-install \
     --target=x86_64-efi \
