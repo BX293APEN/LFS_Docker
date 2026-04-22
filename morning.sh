@@ -216,12 +216,36 @@ else
         PATH=/usr/bin:/usr/sbin:/bin:/sbin \
         /bin/bash << 'GRUB_EOF'
 set -e
+
+# モジュールを明示的に指定してインストール
+# （grub-install だけではモジュールが EFI パーティションにコピーされないケースへの対策）
 grub-install \
     --target=x86_64-efi \
     --efi-directory=/boot/efi \
     --bootloader-id=lfs \
-    --removable
+    --removable \
+    --recheck \
+    --modules="part_gpt part_msdos ext2 fat normal boot linux configfile \
+               search search_fs_uuid search_fs_file search_label \
+               minicmd ls echo test true all_video gfxterm font"
+
 grub-mkconfig -o /boot/grub/grub.cfg
+
+# モジュールが EFI パーティションに存在するか確認
+MOD_COUNT=$(find /boot/efi -name "*.mod" 2>/dev/null | wc -l)
+echo "[CHROOT] EFI パーティション内モジュール数: ${MOD_COUNT}"
+if [[ "${MOD_COUNT}" -eq 0 ]]; then
+    echo "[WARN] モジュールが EFI パーティションに見つかりません。"
+    echo "       /usr/lib/grub/x86_64-efi/ から手動コピーします..."
+    GRUB_MOD_SRC="/usr/lib/grub/x86_64-efi"
+    GRUB_MOD_DST="/boot/efi/EFI/BOOT/grub"
+    mkdir -p "${GRUB_MOD_DST}"
+    cp -r "${GRUB_MOD_SRC}/"*.mod  "${GRUB_MOD_DST}/" 2>/dev/null || true
+    cp -r "${GRUB_MOD_SRC}/"*.lst  "${GRUB_MOD_DST}/" 2>/dev/null || true
+    MOD_COUNT=$(find /boot/efi -name "*.mod" | wc -l)
+    echo "[CHROOT] コピー後モジュール数: ${MOD_COUNT}"
+fi
+
 echo "[CHROOT] GRUB 完了"
 GRUB_EOF
 fi
