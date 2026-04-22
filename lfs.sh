@@ -128,21 +128,9 @@ smart_wget() {
     local dest="$1"; shift
     local urls=("$@")
     local flag_fail="${FLAG_DIR}/dl_failed_${dest//\//_}"
-    local fname; fname=$(basename "${dest}")
 
     if [[ -s "${dest}" ]]; then
         log_info "  [SKIP] ${dest} 取得済み"
-        rm -f "${flag_fail}"
-        return 0
-    fi
-
-    # ── ローカルキャッシュ優先 ──────────────────────────────────────────────
-    # ホスト側の ./build/cache/<ファイル名> に置いておけばダウンロードをスキップ
-    # 例: cp ~/Downloads/unifont_all-15.1.04.bdf.gz ./build/cache/
-    local local_cache="/${WS:-build}/cache/${fname}"
-    if [[ -s "${local_cache}" ]]; then
-        log_info "  [LOCAL] ${dest} ← ${local_cache}"
-        cp "${local_cache}" "${dest}"
         rm -f "${flag_fail}"
         return 0
     fi
