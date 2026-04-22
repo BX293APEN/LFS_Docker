@@ -252,11 +252,15 @@ insmod fat
 search --no-floppy --fs-uuid --set=root ${ROOT_UUID}
 
 menuentry "Linux From Scratch" {
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw quiet
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw quiet console=tty0
+}
+
+menuentry "Linux From Scratch (nomodeset)" {
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw nomodeset console=tty0
 }
 
 menuentry "Linux From Scratch (verbose)" {
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw console=tty0
 }
 CFGEOF
 echo "[CHROOT] /boot/grub/grub.cfg 生成完了"
