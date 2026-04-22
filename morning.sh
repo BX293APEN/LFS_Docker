@@ -228,7 +228,7 @@ grub-install \
     --recheck \
     --modules="part_gpt part_msdos ext2 fat normal boot linux configfile \
                search search_fs_uuid search_fs_file search_label \
-               minicmd ls echo test true all_video gfxterm font"
+               minicmd ls echo test true"
 
 # ── grub.cfg を手動生成（grub-mkconfig より確実）──────────
 KERNEL=$(ls /boot/vmlinuz-* 2>/dev/null | head -1 | xargs basename)
@@ -248,35 +248,29 @@ set timeout=5
 insmod part_gpt
 insmod ext2
 insmod fat
-insmod all_video
-insmod gfxterm
-insmod vbe
-insmod vga
-insmod video_bochs
-insmod video_cirrus
 
-# 解像度設定（auto で UEFI が対応する最適解像度を選ぶ）
-set gfxmode=auto
-terminal_output gfxterm
+# ASCII テキストコンソールモード（gfxterm/unicode.pf2 不要で文字化けしない）
+terminal_output console
+terminal_input  console
 
 search --no-floppy --fs-uuid --set=root ${ROOT_UUID}
 
 menuentry "Linux From Scratch" {
-    set gfxpayload=keep
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw quiet \
-        console=tty0 video=efifb:on
-}
-
-menuentry "Linux From Scratch (nomodeset)" {
     set gfxpayload=text
     linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
-        nomodeset console=tty0
+        nomodeset console=tty0 console=ttyS0,115200
+}
+
+menuentry "Linux From Scratch (EFI framebuffer)" {
+    set gfxpayload=keep
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
+        console=tty0 video=efifb:on
 }
 
 menuentry "Linux From Scratch (verbose)" {
-    set gfxpayload=keep
+    set gfxpayload=text
     linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
-        console=tty0 video=efifb:on
+        nomodeset console=tty0
 }
 CFGEOF
 echo "[CHROOT] /boot/grub/grub.cfg 生成完了"

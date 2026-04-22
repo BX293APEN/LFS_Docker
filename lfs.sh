@@ -62,7 +62,7 @@ _load_pkg_override "libgcrypt-1.11.0.tar.bz2"        "CLI_URL_LIBGCRYPT"
 _load_pkg_override "grub-2.12.tar.xz"                "CLI_URL_GRUB"
 _load_pkg_override "libpng-1.6.44.tar.xz"            "CLI_URL_LIBPNG"
 _load_pkg_override "freetype-2.13.3.tar.xz"          "CLI_URL_FREETYPE"
-_load_pkg_override "unifont_all-15.1.04.bdf.gz"      "CLI_URL_UNIFONT"
+_load_pkg_override "unifont-15.1.04.bdf.gz"       "CLI_URL_UNIFONT"
 
 DL_RETRIES="${DL_RETRIES:-3}"
 DL_TIMEOUT="${DL_TIMEOUT:-90}"
@@ -1855,22 +1855,10 @@ build "GRUB" "grub-2.12.tar.xz" do_grub
 # morning.sh の grub-install / grub-mkconfig がこれらを必要とする
 mkdir -p /boot/efi /boot/grub/fonts
 
-# ── unicode.pf2 生成（日本語GRUBメニュー表示） ───────────────
-# unifont_all-15.1.04.bdf.gz から unicode.pf2 を生成して配置する
-# grub-mkconfig は /boot/grub/fonts/unicode.pf2 を自動的に参照する
-if [[ -f "${SRC}/unifont-15.1.04.bdf.gz" ]]; then
-    echo "[CLI] unicode.pf2 生成中..."
-    cd /tmp
-    cp "${SRC}/unifont-15.1.04.bdf.gz" .
-    gunzip -f unifont-15.1.04.bdf.gz
-    grub-mkfont -s 16 -o /boot/grub/fonts/unicode.pf2 unifont-15.1.04.bdf \
-        && echo "[CLI] unicode.pf2 生成完了" \
-        || echo "[WARN] unicode.pf2 生成に失敗しました（英語フォールバック）"
-    rm -f unifont-15.1.04.bdf
-    cd "${SRC}"
-else
-    echo "[WARN] unifont_all-15.1.04.bdf.gz が見つかりません。unicode.pf2 をスキップします。"
-fi
+# ── unicode.pf2 生成はスキップ ───────────────────────────────
+# gfxterm/unifont は文字化けの原因となるため使用しない。
+# GRUBメニューは ASCII コンソールモード (terminal_output console) で表示する。
+echo "[CLI] GRUBフォント生成をスキップ（コンソールモードを使用）"
 
 # ── Linux カーネル ────────────────────────────────────────────
 do_kernel() {
@@ -1880,8 +1868,19 @@ do_kernel() {
     # 必要な追加設定
     scripts/config --enable CONFIG_EFI_STUB
     scripts/config --enable CONFIG_EFI
+    # ── ディスプレイ / フレームバッファ（黒画面防止） ──────────
+    # nomodeset でも動作するように simpledrm / efifb / vesafb を有効化
+    scripts/config --enable CONFIG_DRM
+    scripts/config --enable CONFIG_DRM_SIMPLEDRM
+    scripts/config --enable CONFIG_FB
     scripts/config --enable CONFIG_FB_EFI
+    scripts/config --enable CONFIG_FB_VESA
     scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
+    scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY
+    scripts/config --enable CONFIG_VT
+    scripts/config --enable CONFIG_VT_CONSOLE
+    scripts/config --enable CONFIG_DUMMY_CONSOLE
+    scripts/config --enable CONFIG_FONT_8x16
     scripts/config --enable CONFIG_USB_SUPPORT
     scripts/config --enable CONFIG_USB_XHCI_HCD
     scripts/config --enable CONFIG_USB_EHCI_HCD
