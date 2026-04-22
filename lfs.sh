@@ -128,9 +128,21 @@ smart_wget() {
     local dest="$1"; shift
     local urls=("$@")
     local flag_fail="${FLAG_DIR}/dl_failed_${dest//\//_}"
+    local fname; fname=$(basename "${dest}")
 
     if [[ -s "${dest}" ]]; then
         log_info "  [SKIP] ${dest} 取得済み"
+        rm -f "${flag_fail}"
+        return 0
+    fi
+
+    # ── ローカルキャッシュ優先 ──────────────────────────────────────────────
+    # ホスト側の ./build/cache/<ファイル名> に置いておけばダウンロードをスキップ
+    # 例: cp ~/Downloads/unifont_all-15.1.04.bdf.gz ./build/cache/
+    local local_cache="/${WS:-build}/cache/${fname}"
+    if [[ -s "${local_cache}" ]]; then
+        log_info "  [LOCAL] ${dest} ← ${local_cache}"
+        cp "${local_cache}" "${dest}"
         rm -f "${flag_fail}"
         return 0
     fi
@@ -1352,7 +1364,9 @@ for pkg in diffutils findutils gawk tar grep gzip patch make texinfo; do
     cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
     # tar は root チェックを持つため FORCE_UNSAFE_CONFIGURE=1 が必要
     if [[ "$pkg" == "tar" ]]; then
-        timeout 120 FORCE_UNSAFE_CONFIGURE=1 ./configure --prefix=/usr || {
+        # timeout の後に環境変数を直接書くとコマンド名として解釈されるため
+        # env コマンド経由で渡す
+        timeout 120 env FORCE_UNSAFE_CONFIGURE=1 ./configure --prefix=/usr || {
             echo "[WARN] ${pkg} configure 失敗、スキップします"
             cd ${SRC} && rm -rf "$dir"
             continue
@@ -1548,7 +1562,9 @@ if ! flagged step5_cli_sources; then
     read -ra _URL_GRUB          <<< "${CLI_URL_GRUB:-https://ftpmirror.gnu.org/grub/grub-2.12.tar.xz https://ftp.jaist.ac.jp/pub/GNU/grub/grub-2.12.tar.xz https://mirrors.kernel.org/gnu/grub/grub-2.12.tar.xz https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz}"
     read -ra _URL_LIBPNG        <<< "${CLI_URL_LIBPNG:-https://downloads.sourceforge.net/libpng/libpng-1.6.44.tar.xz https://github.com/pnggroup/libpng/releases/download/v1.6.44/libpng-1.6.44.tar.xz}"
     read -ra _URL_FREETYPE      <<< "${CLI_URL_FREETYPE:-https://downloads.sourceforge.net/freetype/freetype-2.13.3.tar.xz https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz}"
-    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftpmirror.gnu.org/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://mirrors.kernel.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://unifoundry.com/pub/unifont/unifont-15.1.04/font-builds/unifont_all-15.1.04.bdf.gz https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz}"
+    # unifont_all-*.bdf.gz は unifoundry.com 専用ファイルで GNU ミラーには存在しない
+    # GNU ミラーに確実にある unifont-15.1.04.bdf.gz (BMP のみ、約1.2MB) を使用する
+    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftpmirror.gnu.org/unifont/unifont-15.1.04/unifont-15.1.04.bdf.gz https://mirrors.kernel.org/gnu/unifont/unifont-15.1.04/unifont-15.1.04.bdf.gz https://ftp.jaist.ac.jp/pub/GNU/unifont/unifont-15.1.04/unifont-15.1.04.bdf.gz https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont-15.1.04.bdf.gz}"
     read -ra _URL_EXPAT         <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
 
     log_info "CLI パッケージのダウンロード中..."
@@ -1584,7 +1600,7 @@ if ! flagged step5_cli_sources; then
     _cli_pkg "grub-2.12.tar.xz"                        "${_URL_GRUB[@]}"
     _cli_pkg "libpng-1.6.44.tar.xz"                    "${_URL_LIBPNG[@]}"
     _cli_pkg "freetype-2.13.3.tar.xz"                  "${_URL_FREETYPE[@]}"
-    _cli_pkg "unifont_all-15.1.04.bdf.gz"              "${_URL_UNIFONT[@]}"
+    _cli_pkg "unifont-15.1.04.bdf.gz"                  "${_URL_UNIFONT[@]}"
     # expat: Step2 で取得済みのはずだがなければ補完
     if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
         _cli_pkg "expat-2.6.2.tar.xz"                  "${_URL_EXPAT[@]}"
@@ -1630,21 +1646,16 @@ build() {
 
 # ── D-Bus ────────────────────────────────────────────────────
 do_dbus() {
-    # dbus 1.15.x は autotools を廃止し meson ビルドに移行済み
-    # ./configure は存在しないため meson を使う
+    # LFS公式 (r13.0-systemd) の手順に準拠
+    # --wrap-mode=nofallback: テスト用Glibの自動ダウンロードを防ぐ
+    # runstatedir等の細かいオプションは不要（デフォルト値が正しい）
     mkdir -p build && cd build
-    meson setup .. \
-        --prefix=/usr \
-        --sysconfdir=/etc \
-        --localstatedir=/var \
+    meson setup --prefix=/usr \
         --buildtype=release \
-        -D runstatedir=/run \
-        -D system_socket=/run/dbus/system_bus_socket \
-        -D doxygen_docs=disabled \
-        -D xml_docs=disabled \
-        -D dbus_user=messagebus
+        --wrap-mode=nofallback \
+        ..
     ninja && ninja install
-    dbus-uuidgen --ensure
+    ln -sfv /etc/machine-id /var/lib/dbus
 }
 build "D-Bus" "dbus-1.15.8.tar.xz" do_dbus
 
@@ -1859,15 +1870,15 @@ mkdir -p /boot/efi /boot/grub/fonts
 # ── unicode.pf2 生成（日本語GRUBメニュー表示） ───────────────
 # unifont_all-15.1.04.bdf.gz から unicode.pf2 を生成して配置する
 # grub-mkconfig は /boot/grub/fonts/unicode.pf2 を自動的に参照する
-if [[ -f "${SRC}/unifont_all-15.1.04.bdf.gz" ]]; then
+if [[ -f "${SRC}/unifont-15.1.04.bdf.gz" ]]; then
     echo "[CLI] unicode.pf2 生成中..."
     cd /tmp
-    cp "${SRC}/unifont_all-15.1.04.bdf.gz" .
-    gunzip -f unifont_all-15.1.04.bdf.gz
-    grub-mkfont -s 16 -o /boot/grub/fonts/unicode.pf2 unifont_all-15.1.04.bdf \
+    cp "${SRC}/unifont-15.1.04.bdf.gz" .
+    gunzip -f unifont-15.1.04.bdf.gz
+    grub-mkfont -s 16 -o /boot/grub/fonts/unicode.pf2 unifont-15.1.04.bdf \
         && echo "[CLI] unicode.pf2 生成完了" \
-        || echo "[WARN] unicode.pf2 生成に失敗しました（日本語表示は英語フォールバック）"
-    rm -f unifont_all-15.1.04.bdf
+        || echo "[WARN] unicode.pf2 生成に失敗しました（英語フォールバック）"
+    rm -f unifont-15.1.04.bdf
     cd "${SRC}"
 else
     echo "[WARN] unifont_all-15.1.04.bdf.gz が見つかりません。unicode.pf2 をスキップします。"
