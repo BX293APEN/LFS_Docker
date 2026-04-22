@@ -1350,11 +1350,20 @@ for pkg in diffutils findutils gawk tar grep gzip patch make texinfo; do
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     # 前回の失敗で残ったディレクトリを削除してからクリーンに展開する
     cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
-    timeout 120 ./configure --prefix=/usr || {
-        echo "[WARN] ${pkg} configure 失敗、スキップします"
-        cd ${SRC} && rm -rf "$dir"
-        continue
-    }
+    # tar は root チェックを持つため FORCE_UNSAFE_CONFIGURE=1 が必要
+    if [[ "$pkg" == "tar" ]]; then
+        timeout 120 FORCE_UNSAFE_CONFIGURE=1 ./configure --prefix=/usr || {
+            echo "[WARN] ${pkg} configure 失敗、スキップします"
+            cd ${SRC} && rm -rf "$dir"
+            continue
+        }
+    else
+        timeout 120 ./configure --prefix=/usr || {
+            echo "[WARN] ${pkg} configure 失敗、スキップします"
+            cd ${SRC} && rm -rf "$dir"
+            continue
+        }
+    fi
     make && make install
     cd ${SRC} && rm -rf "$dir"
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
@@ -1539,7 +1548,7 @@ if ! flagged step5_cli_sources; then
     read -ra _URL_GRUB          <<< "${CLI_URL_GRUB:-https://ftpmirror.gnu.org/grub/grub-2.12.tar.xz https://ftp.jaist.ac.jp/pub/GNU/grub/grub-2.12.tar.xz https://mirrors.kernel.org/gnu/grub/grub-2.12.tar.xz https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz}"
     read -ra _URL_LIBPNG        <<< "${CLI_URL_LIBPNG:-https://downloads.sourceforge.net/libpng/libpng-1.6.44.tar.xz https://github.com/pnggroup/libpng/releases/download/v1.6.44/libpng-1.6.44.tar.xz}"
     read -ra _URL_FREETYPE      <<< "${CLI_URL_FREETYPE:-https://downloads.sourceforge.net/freetype/freetype-2.13.3.tar.xz https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz}"
-    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://unifoundry.com/pub/unifont/unifont-15.1.04/font-builds/unifont_all-15.1.04.bdf.gz}"
+    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://unifoundry.com/pub/unifont/unifont-15.1.04/font-builds/unifont_all-15.1.04.bdf.gz https://ftpmirror.gnu.org/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://mirrors.kernel.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz}"
     read -ra _URL_EXPAT         <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
 
     log_info "CLI パッケージのダウンロード中..."
@@ -1621,12 +1630,20 @@ build() {
 
 # ── D-Bus ────────────────────────────────────────────────────
 do_dbus() {
-    ./configure --prefix=/usr --sysconfdir=/etc \
-        --localstatedir=/var --runstatedir=/run \
-        --disable-static --disable-doxygen-docs \
-        --disable-xml-docs \
-        --with-system-socket=/run/dbus/system_bus_socket
-    make && make install
+    # dbus 1.15.x は autotools を廃止し meson ビルドに移行済み
+    # ./configure は存在しないため meson を使う
+    mkdir -p build && cd build
+    meson setup .. \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --localstatedir=/var \
+        --buildtype=release \
+        -D runstatedir=/run \
+        -D system_socket=/run/dbus/system_bus_socket \
+        -D doxygen_docs=disabled \
+        -D xml_docs=disabled \
+        -D dbus_user=messagebus
+    ninja && ninja install
     dbus-uuidgen --ensure
 }
 build "D-Bus" "dbus-1.15.8.tar.xz" do_dbus
@@ -1689,7 +1706,8 @@ do_curl() {
     ./configure --prefix=/usr --disable-static \
         --enable-threaded-resolver \
         --with-openssl \
-        --with-ca-path=/etc/ssl/certs
+        --with-ca-path=/etc/ssl/certs \
+        --without-libpsl
     make && make install
 }
 build "curl" "curl-8.11.1.tar.xz" do_curl
