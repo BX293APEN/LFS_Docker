@@ -248,19 +248,35 @@ set timeout=5
 insmod part_gpt
 insmod ext2
 insmod fat
+insmod all_video
+insmod gfxterm
+insmod vbe
+insmod vga
+insmod video_bochs
+insmod video_cirrus
+
+# 解像度設定（auto で UEFI が対応する最適解像度を選ぶ）
+set gfxmode=auto
+terminal_output gfxterm
 
 search --no-floppy --fs-uuid --set=root ${ROOT_UUID}
 
 menuentry "Linux From Scratch" {
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw quiet console=tty0
+    set gfxpayload=keep
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw quiet \
+        console=tty0 video=efifb:on
 }
 
 menuentry "Linux From Scratch (nomodeset)" {
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw nomodeset console=tty0
+    set gfxpayload=text
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
+        nomodeset console=tty0
 }
 
 menuentry "Linux From Scratch (verbose)" {
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw console=tty0
+    set gfxpayload=keep
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
+        console=tty0 video=efifb:on
 }
 CFGEOF
 echo "[CHROOT] /boot/grub/grub.cfg 生成完了"
