@@ -1548,7 +1548,7 @@ if ! flagged step5_cli_sources; then
     read -ra _URL_GRUB          <<< "${CLI_URL_GRUB:-https://ftpmirror.gnu.org/grub/grub-2.12.tar.xz https://ftp.jaist.ac.jp/pub/GNU/grub/grub-2.12.tar.xz https://mirrors.kernel.org/gnu/grub/grub-2.12.tar.xz https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz}"
     read -ra _URL_LIBPNG        <<< "${CLI_URL_LIBPNG:-https://downloads.sourceforge.net/libpng/libpng-1.6.44.tar.xz https://github.com/pnggroup/libpng/releases/download/v1.6.44/libpng-1.6.44.tar.xz}"
     read -ra _URL_FREETYPE      <<< "${CLI_URL_FREETYPE:-https://downloads.sourceforge.net/freetype/freetype-2.13.3.tar.xz https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz}"
-    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://unifoundry.com/pub/unifont/unifont-15.1.04/font-builds/unifont_all-15.1.04.bdf.gz https://ftpmirror.gnu.org/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://mirrors.kernel.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz}"
+    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftpmirror.gnu.org/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://mirrors.kernel.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://unifoundry.com/pub/unifont/unifont-15.1.04/font-builds/unifont_all-15.1.04.bdf.gz https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz}"
     read -ra _URL_EXPAT         <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
 
     log_info "CLI パッケージのダウンロード中..."
