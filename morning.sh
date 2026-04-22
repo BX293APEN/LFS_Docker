@@ -246,6 +246,13 @@ if [[ "${MOD_COUNT}" -eq 0 ]]; then
     echo "[CHROOT] コピー後モジュール数: ${MOD_COUNT}"
 fi
 
+# grub.cfg を EFI パーティション内にも配置する
+# BOOTX64.EFI は起動時に自身と同じディレクトリの grub.cfg を探すため
+# /boot/efi/EFI/BOOT/grub.cfg にコピーする必要がある
+echo "[CHROOT] grub.cfg を EFI パーティションにコピー中..."
+cp /boot/grub/grub.cfg /boot/efi/EFI/BOOT/grub.cfg
+echo "[CHROOT] grub.cfg コピー完了"
+
 echo "[CHROOT] GRUB 完了"
 GRUB_EOF
 fi
