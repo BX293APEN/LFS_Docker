@@ -1866,29 +1866,68 @@ do_kernel() {
     # defconfig ベース（最低限の構成）
     make defconfig
     # 必要な追加設定
-    scripts/config --enable CONFIG_EFI_STUB
+
+    # ── EFI ブート関連 ─────────────────────────────
     scripts/config --enable CONFIG_EFI
-    # ── ディスプレイ / フレームバッファ（黒画面防止） ──────────
-    # nomodeset でも動作するように simpledrm / efifb / vesafb を有効化
-    scripts/config --enable CONFIG_DRM
-    scripts/config --enable CONFIG_DRM_SIMPLEDRM
-    scripts/config --enable CONFIG_FB
-    scripts/config --enable CONFIG_FB_EFI
-    scripts/config --enable CONFIG_FB_VESA
-    scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
-    scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY
+    scripts/config --enable CONFIG_EFI_STUB
+    scripts/config --enable CONFIG_EFI_PARTITION
+    
+    # ── /dev を自動で作る（必須級） ────────────────
+    scripts/config --enable CONFIG_DEVTMPFS
+    scripts/config --enable CONFIG_DEVTMPFS_MOUNT
+
+    # ── コンソール / フレームバッファ ─────────────
     scripts/config --enable CONFIG_VT
     scripts/config --enable CONFIG_VT_CONSOLE
     scripts/config --enable CONFIG_DUMMY_CONSOLE
+    scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE
+    scripts/config --enable CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY
+    scripts/config --enable CONFIG_FB
+    scripts/config --enable CONFIG_FB_EFI
+    scripts/config --enable CONFIG_FB_VESA
+    scripts/config --enable CONFIG_DRM
+    scripts/config --enable CONFIG_DRM_SIMPLEDRM
     scripts/config --enable CONFIG_FONT_8x16
+
+    # ── ストレージ（USBルートに必須）──────────────
+    # SCSI サブシステム
+    scripts/config --enable CONFIG_SCSI
+    scripts/config --enable CONFIG_SCSI_MOD
+    scripts/config --enable CONFIG_BLK_DEV_SD
+
+    # USB コントローラ
     scripts/config --enable CONFIG_USB_SUPPORT
     scripts/config --enable CONFIG_USB_XHCI_HCD
     scripts/config --enable CONFIG_USB_EHCI_HCD
+
+    # USB Mass Storage（USBメモリ本体）
+    scripts/config --enable CONFIG_USB_STORAGE
+
+    # SATA（内蔵SSD/HDDからも起動できるように）
     scripts/config --enable CONFIG_ATA
     scripts/config --enable CONFIG_AHCI
+
+    # ── パーティション関連 ───────────────────────
+    scripts/config --enable CONFIG_PARTITION_ADVANCED
+    scripts/config --enable CONFIG_MSDOS_PARTITION
+    scripts/config --enable CONFIG_EFI_PARTITION
+
+    # ── ファイルシステム ─────────────────────────
     scripts/config --enable CONFIG_EXT4_FS
+
     scripts/config --enable CONFIG_VFAT_FS
+    scripts/config --enable CONFIG_FAT_FS
+    scripts/config --enable CONFIG_MSDOS_FS
+    scripts/config --enable CONFIG_NLS_CODEPAGE_437
+    scripts/config --enable CONFIG_NLS_ISO8859_1
     scripts/config --enable CONFIG_NLS_UTF8
+
+    # ── 不要そうなモジュール化を抑える（任意）───
+    # ここで必要なら scripts/config --disable CONFIG_***_MODULES なども可
+    # scripts/config --disable CONFIG_EXT4_FS_POSIX_ACL
+    # scripts/config --disable CONFIG_EXT4_FS_SECURITY
+
+    
     make -j__CPU_CORE__
     make modules_install
     cp -v arch/x86/boot/bzImage /boot/vmlinuz-lfs
