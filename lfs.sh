@@ -60,6 +60,9 @@ _load_pkg_override "openssh-9.9p1.tar.gz"            "CLI_URL_OPENSSH"
 _load_pkg_override "libgpg-error-1.50.tar.bz2"       "CLI_URL_LIBGPG_ERROR"
 _load_pkg_override "libgcrypt-1.11.0.tar.bz2"        "CLI_URL_LIBGCRYPT"
 _load_pkg_override "grub-2.12.tar.xz"                "CLI_URL_GRUB"
+_load_pkg_override "libpng-1.6.44.tar.xz"            "CLI_URL_LIBPNG"
+_load_pkg_override "freetype-2.13.3.tar.xz"          "CLI_URL_FREETYPE"
+_load_pkg_override "unifont_all-15.1.04.bdf.gz"      "CLI_URL_UNIFONT"
 
 DL_RETRIES="${DL_RETRIES:-3}"
 DL_TIMEOUT="${DL_TIMEOUT:-90}"
@@ -430,7 +433,7 @@ pkg_build() {
 }
 
 do_binutils_p1() {
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --prefix="${LFS}/tools" --with-sysroot="${LFS}" \
         --target="${LFS_TGT}" --disable-nls --enable-gprofng=no \
         --disable-werror --enable-new-dtags --enable-default-hash-style=gnu
@@ -443,7 +446,7 @@ do_gcc_p1() {
     done
     case $(uname -m) in x86_64)
         sed -e '/m64=/s/lib64/lib/' -i.orig gcc/config/i386/t-linux64 ;; esac
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --target="${LFS_TGT}" --prefix="${LFS}/tools" \
         --with-glibc-version=2.40 --with-sysroot="${LFS}" --with-newlib \
         --without-headers --enable-default-pie --enable-default-ssp \
@@ -470,7 +473,7 @@ do_glibc() {
     ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-linux-x86-64.so.2"
     ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-lsb-x86-64.so.3"
     patch -Np1 -i "../$(ls ../glibc-*.patch 2>/dev/null | head -1)" 2>/dev/null || true
-    rm -rf build && mkdir build && cd build
+    rm -rf build && mkdir -p build && cd build
     echo "rootsbindir=/usr/sbin" > configparms
     ../configure --prefix=/usr --host="${LFS_TGT}" \
         --build="$(../scripts/config.guess)" --enable-kernel=4.19 \
@@ -481,7 +484,7 @@ do_glibc() {
 }
 
 do_libstdcpp() {
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../libstdc++-v3/configure --host="${LFS_TGT}" \
         --build="$(../config.guess)" --prefix=/usr \
         --disable-multilib --disable-nls --disable-libstdcxx-pch \
@@ -563,7 +566,7 @@ tt_build "M4" "$(ls ${SRC}/m4-*.tar.* 2>/dev/null | head -1)" do_m4
 # ── Ncurses ─────────────────────────────────────────────────
 do_ncurses() {
     sed -i s/mawk// configure
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure
     make -C include && make -C progs tic
     cd ..
@@ -613,7 +616,7 @@ tt_build "Diffutils" "$(ls ${SRC}/diffutils-*.tar.* 2>/dev/null | head -1)" do_d
 
 # ── File ────────────────────────────────────────────────────
 do_file() {
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --disable-bzlib --disable-libseccomp \
         --disable-xzlib --disable-zlib
     make
@@ -703,7 +706,7 @@ tt_build "Xz" "$(ls ${SRC}/xz-*.tar.* 2>/dev/null | head -1)" do_xz
 # ── Binutils Pass2 ──────────────────────────────────────────
 do_binutils_p2() {
     sed '6009s/$add_dir//' -i ltmain.sh
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --prefix=/usr --build="$(../config.guess)" \
         --host="${LFS_TGT}" --disable-nls --enable-shared \
         --enable-gprofng=no --disable-werror \
@@ -723,7 +726,7 @@ do_gcc_p2() {
         sed -e '/m64=/s/lib64/lib/' -i.orig gcc/config/i386/t-linux64 ;; esac
     sed '/thread_header =/s/@.*@/gthr-posix.h/' \
         -i libgcc/Makefile.in libstdc++-v3/include/Makefile.in
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --build="$(../config.guess)" \
         --host="${LFS_TGT}" --target="${LFS_TGT}" \
         LDFLAGS_FOR_TARGET="-L${PWD}/${LFS_TGT}/libgcc" \
@@ -874,7 +877,7 @@ build "Python-early" "$(ls ${SRC}/Python-*.tar.* 2>/dev/null | head -1)" do_pyth
 # ── Glibc (final) ───────────────────────────────────────────
 do_glibc_final() {
     patch -Np1 -i "../$(ls ../glibc-*.patch 2>/dev/null | head -1)" 2>/dev/null || true
-    rm -rf build && mkdir build && cd build
+    rm -rf build && mkdir -p build && cd build
     echo "rootsbindir=/usr/sbin" > configparms
     ../configure --prefix=/usr --disable-werror \
         --enable-kernel=4.19 --enable-stack-protector=strong \
@@ -1032,7 +1035,7 @@ CACHE
 build "Expect" "$(ls ${SRC}/expect*.tar.* 2>/dev/null | head -1)" do_expect
 
 do_dejagnu() {
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --prefix=/usr
     make install
 }
@@ -1047,7 +1050,7 @@ build "Pkgconf" "$(ls ${SRC}/pkgconf-*.tar.* 2>/dev/null | head -1)" do_pkgconf
 
 # ── Binutils (final) ────────────────────────────────────────
 do_binutils_final() {
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --prefix=/usr --sysconfdir=/etc \
         --enable-gold --enable-ld=default --enable-plugins \
         --enable-shared --disable-werror --enable-64-bit-bfd \
@@ -1156,7 +1159,7 @@ build "Shadow" "$(ls ${SRC}/shadow-*.tar.* 2>/dev/null | head -1)" do_shadow
 do_gcc_final() {
     case $(uname -m) in x86_64)
         sed -e '/m64=/s/lib64/lib/' -i.orig gcc/config/i386/t-linux64 ;; esac
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --prefix=/usr --enable-languages=c,c++ \
         --enable-default-pie --enable-default-ssp \
         --enable-host-pie --disable-multilib \
@@ -1420,7 +1423,7 @@ do_udev() {
     sed -i -e 's/GROUP="render"/GROUP="video"/' \
            -e 's/GROUP="sgx", //' rules.d/50-udev-default.rules.in
     sed -i -e '/systemd-sysctl/s/^/#/' rules.d/99-systemd.rules.in
-    mkdir build && cd build
+    mkdir -p build && cd build
     meson setup .. --prefix=/usr --buildtype=release \
         -D mode=release -D dev-kvm-mode=0660 \
         -D link-udev-shared=false -D logind=false \
@@ -1466,7 +1469,7 @@ do_procps() {
 build "Procps-ng" "$(ls ${SRC}/procps-ng-*.tar.* 2>/dev/null | head -1)" do_procps
 
 do_e2fsprogs() {
-    mkdir build && cd build
+    mkdir -p build && cd build
     ../configure --prefix=/usr --sysconfdir=/etc \
         --enable-elf-shlibs --disable-libblkid \
         --disable-libuuid --disable-uuidd --disable-fsck
@@ -1534,6 +1537,9 @@ if ! flagged step5_cli_sources; then
     read -ra _URL_LIBGPG_ERROR  <<< "${CLI_URL_LIBGPG_ERROR:-https://www.gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.50.tar.bz2 https://mirrors.dotsrc.org/gcrypt/libgpg-error/libgpg-error-1.50.tar.bz2}"
     read -ra _URL_LIBGCRYPT     <<< "${CLI_URL_LIBGCRYPT:-https://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.11.0.tar.bz2 https://mirrors.dotsrc.org/gcrypt/libgcrypt/libgcrypt-1.11.0.tar.bz2}"
     read -ra _URL_GRUB          <<< "${CLI_URL_GRUB:-https://ftpmirror.gnu.org/grub/grub-2.12.tar.xz https://ftp.jaist.ac.jp/pub/GNU/grub/grub-2.12.tar.xz https://mirrors.kernel.org/gnu/grub/grub-2.12.tar.xz https://ftp.gnu.org/gnu/grub/grub-2.12.tar.xz}"
+    read -ra _URL_LIBPNG        <<< "${CLI_URL_LIBPNG:-https://downloads.sourceforge.net/libpng/libpng-1.6.44.tar.xz https://github.com/pnggroup/libpng/releases/download/v1.6.44/libpng-1.6.44.tar.xz}"
+    read -ra _URL_FREETYPE      <<< "${CLI_URL_FREETYPE:-https://downloads.sourceforge.net/freetype/freetype-2.13.3.tar.xz https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz}"
+    read -ra _URL_UNIFONT       <<< "${CLI_URL_UNIFONT:-https://ftp.gnu.org/gnu/unifont/unifont-15.1.04/unifont_all-15.1.04.bdf.gz https://unifoundry.com/pub/unifont/unifont-15.1.04/font-builds/unifont_all-15.1.04.bdf.gz}"
     read -ra _URL_EXPAT         <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
 
     log_info "CLI パッケージのダウンロード中..."
@@ -1567,6 +1573,9 @@ if ! flagged step5_cli_sources; then
     _cli_pkg "libgpg-error-1.50.tar.bz2"               "${_URL_LIBGPG_ERROR[@]}"
     _cli_pkg "libgcrypt-1.11.0.tar.bz2"                "${_URL_LIBGCRYPT[@]}"
     _cli_pkg "grub-2.12.tar.xz"                        "${_URL_GRUB[@]}"
+    _cli_pkg "libpng-1.6.44.tar.xz"                    "${_URL_LIBPNG[@]}"
+    _cli_pkg "freetype-2.13.3.tar.xz"                  "${_URL_FREETYPE[@]}"
+    _cli_pkg "unifont_all-15.1.04.bdf.gz"              "${_URL_UNIFONT[@]}"
     # expat: Step2 で取得済みのはずだがなければ補完
     if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
         _cli_pkg "expat-2.6.2.tar.xz"                  "${_URL_EXPAT[@]}"
@@ -1679,7 +1688,7 @@ build "PCRE2" "pcre2-10.44.tar.bz2" do_pcre2
 do_curl() {
     ./configure --prefix=/usr --disable-static \
         --enable-threaded-resolver \
-        --with-ssl=/etc/ssl \
+        --with-openssl \
         --with-ca-path=/etc/ssl/certs
     make && make install
 }
@@ -1763,6 +1772,7 @@ do_dhcpcd() {
         --libexecdir=/usr/lib/dhcpcd
     make && make install
     # 起動スクリプト
+    mkdir -p /etc/rc.d/init.d
     cat > /etc/rc.d/init.d/dhcpcd << 'DHCPEOF'
 #!/bin/bash
 case $1 in
@@ -1791,6 +1801,23 @@ do_openssh() {
 }
 build "OpenSSH" "openssh-9.9p1.tar.gz" do_openssh
 
+# ── libpng (freetype の推奨依存) ─────────────────────────────
+do_libpng() {
+    ./configure --prefix=/usr --disable-static
+    make && make install
+}
+build "libpng" "libpng-1.6.44.tar.xz" do_libpng
+
+# ── FreeType (grub-mkfont の必須依存) ────────────────────────
+do_freetype() {
+    sed -ri "s:.*(AUX_MODULES.*valid):\1:" modules.cfg
+    sed -r "s:.*(#.*SUBPIXEL_RENDERING) .*:\1:" \
+        -i include/freetype/config/ftoption.h
+    ./configure --prefix=/usr --enable-freetype-config --disable-static
+    make && make install
+}
+build "freetype" "freetype-2.13.3.tar.xz" do_freetype
+
 # ── GRUB ─────────────────────────────────────────────────────
 do_grub() {
     unset {C,CPP,CXX,LD}FLAGS
@@ -1806,6 +1833,27 @@ do_grub() {
     mv -v /etc/grub.d/50_osprober /etc/grub.d/50_osprober.bak 2>/dev/null || true
 }
 build "GRUB" "grub-2.12.tar.xz" do_grub
+
+# ── GRUB が必要とするディレクトリを事前作成 ──────────────────
+# morning.sh の grub-install / grub-mkconfig がこれらを必要とする
+mkdir -p /boot/efi /boot/grub/fonts
+
+# ── unicode.pf2 生成（日本語GRUBメニュー表示） ───────────────
+# unifont_all-15.1.04.bdf.gz から unicode.pf2 を生成して配置する
+# grub-mkconfig は /boot/grub/fonts/unicode.pf2 を自動的に参照する
+if [[ -f "${SRC}/unifont_all-15.1.04.bdf.gz" ]]; then
+    echo "[CLI] unicode.pf2 生成中..."
+    cd /tmp
+    cp "${SRC}/unifont_all-15.1.04.bdf.gz" .
+    gunzip -f unifont_all-15.1.04.bdf.gz
+    grub-mkfont -s 16 -o /boot/grub/fonts/unicode.pf2 unifont_all-15.1.04.bdf \
+        && echo "[CLI] unicode.pf2 生成完了" \
+        || echo "[WARN] unicode.pf2 生成に失敗しました（日本語表示は英語フォールバック）"
+    rm -f unifont_all-15.1.04.bdf
+    cd "${SRC}"
+else
+    echo "[WARN] unifont_all-15.1.04.bdf.gz が見つかりません。unicode.pf2 をスキップします。"
+fi
 
 # ── Linux カーネル ────────────────────────────────────────────
 do_kernel() {
