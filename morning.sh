@@ -237,7 +237,7 @@ search --no-floppy --fs-uuid --set=root __ROOT_UUID__
 
 menuentry "Linux From Scratch (Delay Boot)" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=UUID=__ROOT_UUID__ rw rootfstype=ext4 rootdelay=10 nomodeset console=tty0
+    linux /boot/__KERNEL__ root=UUID=__ROOT_UUID__ rw rootfstype=ext4 rootwait rootdelay=20 nomodeset console=tty0
 __INITRD_LINE__
 }
 
