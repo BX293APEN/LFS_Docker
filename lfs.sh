@@ -1915,6 +1915,7 @@ do_kernel() {
 
     # ── ファイルシステム ────────────────────────────
     scripts/config --enable CONFIG_EXT4_FS
+    scripts/config --enable CONFIG_EXT4_FS_LABEL
     scripts/config --enable CONFIG_VFAT_FS
     scripts/config --enable CONFIG_FAT_FS
     scripts/config --enable CONFIG_MSDOS_FS
@@ -2009,6 +2010,55 @@ cat > /etc/fstab << 'FSTABEOF'
 # UUID=XXXX  /         ext4   defaults,noatime 0 1
 # UUID=XXXX  /boot/efi vfat   defaults         0 2
 FSTABEOF
+
+# ── /etc/inittab ─────────────────────────────────────────────
+cat > /etc/inittab << 'INITTABEOF'
+# デフォルトランレベル
+id:3:initdefault:
+
+# システム初期化
+si:S:sysinit:/etc/rc.d/init.d/rcS
+
+# ランレベル3
+l3:3:wait:/etc/rc.d/rc 3
+
+# コンソール getty（tty1はrootで自動ログイン）
+c1:2345:respawn:/sbin/agetty --autologin root tty1 38400
+c2:2345:respawn:/sbin/agetty tty2 38400
+c3:2345:respawn:/sbin/agetty tty3 38400
+
+# Ctrl-Alt-Del
+ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now
+INITTABEOF
+
+# ── /etc/rc.d/init.d/rcS (sysinit) ───────────────────────────
+mkdir -p /etc/rc.d/init.d /etc/rc.d/rc3.d
+cat > /etc/rc.d/init.d/rcS << 'RCSEOF'
+#!/bin/bash
+mountpoint -q /proc || mount -t proc proc /proc
+mountpoint -q /sys  || mount -t sysfs sysfs /sys
+mountpoint -q /dev  || mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /dev/shm
+mountpoint -q /dev/pts || mount -t devpts devpts /dev/pts
+mountpoint -q /dev/shm || mount -t tmpfs tmpfs /dev/shm
+mountpoint -q /run      || mount -t tmpfs tmpfs /run
+hostname $(cat /etc/hostname 2>/dev/null || echo lfs)
+mount -o remount,rw / 2>/dev/null || true
+mkdir -p /var/log /var/run /var/lock
+touch /var/log/wtmp /var/log/btmp /var/run/utmp 2>/dev/null || true
+echo "システム初期化完了"
+RCSEOF
+chmod +x /etc/rc.d/init.d/rcS
+
+# ── /etc/rc.d/rc ─────────────────────────────────────────────
+cat > /etc/rc.d/rc << 'RCEOF'
+#!/bin/bash
+RUNLEVEL=$1
+for script in /etc/rc.d/rc${RUNLEVEL}.d/S*; do
+    [ -x "$script" ] && "$script" start
+done
+RCEOF
+chmod +x /etc/rc.d/rc
 
 echo ""
 echo "[CLI] ===== CLI ビルド完了！ ====="
