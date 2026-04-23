@@ -63,6 +63,8 @@ _load_pkg_override "grub-2.12.tar.xz"                "CLI_URL_GRUB"
 _load_pkg_override "libpng-1.6.44.tar.xz"            "CLI_URL_LIBPNG"
 _load_pkg_override "freetype-2.13.3.tar.xz"          "CLI_URL_FREETYPE"
 _load_pkg_override "unifont-15.1.04.bdf.gz"       "CLI_URL_UNIFONT"
+_load_pkg_override "kbd-2.6.4.tar.xz"             "CLI_URL_KBD"
+_load_pkg_override "which-2.21.tar.gz"             "CLI_URL_WHICH"
 
 DL_RETRIES="${DL_RETRIES:-3}"
 DL_TIMEOUT="${DL_TIMEOUT:-90}"
@@ -1590,9 +1592,11 @@ if ! flagged step5_cli_sources; then
     _cli_pkg "freetype-2.13.3.tar.xz"                  "${_URL_FREETYPE[@]}"
     _cli_pkg "unifont-15.1.04.bdf.gz"                  "${_URL_UNIFONT[@]}"
     # kbd: 日本語キーボード配列（loadkeys jp106）に必要
+    # ミラーは .env の CLI_URL_KBD で上書き可能（スペース区切りで複数指定）
     read -ra _URL_KBD <<< "${CLI_URL_KBD:-https://www.kernel.org/pub/linux/utils/kbd/kbd-2.6.4.tar.xz https://mirrors.edge.kernel.org/pub/linux/utils/kbd/kbd-2.6.4.tar.xz}"
     _cli_pkg "kbd-2.6.4.tar.xz" "${_URL_KBD[@]}"
     # which: Step4のwget-listに含まれない場合の補完
+    # ミラーは .env の CLI_URL_WHICH で上書き可能（スペース区切りで複数指定）
     if [[ ! -s "which-2.21.tar.gz" ]]; then
         read -ra _URL_WHICH <<< "${CLI_URL_WHICH:-https://ftp.gnu.org/gnu/which/which-2.21.tar.gz https://ftpmirror.gnu.org/which/which-2.21.tar.gz}"
         _cli_pkg "which-2.21.tar.gz" "${_URL_WHICH[@]}"
@@ -1840,6 +1844,48 @@ do_which() {
 }
 build "which" "which-2.21.tar.gz" do_which
 
+# ── neofetch（ペンギンAA + システム情報表示）────────────────
+# neofetch はシェルスクリプト単体。tarball不要でGitHubから直接取得。
+# ミラーは .env の CLI_URL_NEOFETCH で上書き可能。
+_NEOFETCH_URL="${CLI_URL_NEOFETCH:-https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch}"
+if curl -fsSL --retry 3 --connect-timeout 30 \
+        -o /usr/bin/neofetch "${_NEOFETCH_URL}" 2>/dev/null; then
+    chmod +x /usr/bin/neofetch
+    echo "[CLI] neofetch インストール完了"
+else
+    # フォールバック: 最小限のneofetch互換スクリプトを内蔵
+    cat > /usr/bin/neofetch << 'NEOFETCH_FALLBACK'
+#!/bin/bash
+# Minimal neofetch fallback (penguin ASCII art)
+_OS=$(grep ^PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "Linux From Scratch")
+_KERNEL=$(uname -r)
+_UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
+_SHELL=$(basename "$SHELL")
+_CPU=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | sed 's/^ *//' || echo "unknown")
+_MEM_TOTAL=$(awk '/MemTotal/{printf "%.0f", $2/1024}' /proc/meminfo)MiB
+_MEM_FREE=$(awk '/MemAvailable/{printf "%.0f", $2/1024}' /proc/meminfo)MiB
+
+C1='\033[1;34m'  # blue bold
+C2='\033[1;37m'  # white bold
+R='\033[0m'
+
+printf "${C1}        #####        ${R}\n"
+printf "${C1}       #######       ${R}  ${C2}OS:${R}     ${_OS}\n"
+printf "${C1}       ##O#O##       ${R}  ${C2}Kernel:${R} ${_KERNEL}\n"
+printf "${C1}       #######       ${R}  ${C2}Uptime:${R} ${_UPTIME}\n"
+printf "${C1}     ###########     ${R}  ${C2}Shell:${R}  ${_SHELL}\n"
+printf "${C1}    #############    ${R}  ${C2}CPU:${R}    ${_CPU}\n"
+printf "${C1}   ###############   ${R}  ${C2}Memory:${R} ${_MEM_FREE} / ${_MEM_TOTAL}\n"
+printf "${C1}   ####  #  #####   ${R}\n"
+printf "${C1}   ##############   ${R}\n"
+printf "${C1}    ############    ${R}\n"
+printf "${C1}      ########      ${R}\n"
+printf "\n"
+NEOFETCH_FALLBACK
+    chmod +x /usr/bin/neofetch
+    echo "[CLI] neofetch フォールバック版をインストール"
+fi
+
 # ── libpng (freetype の推奨依存) ─────────────────────────────
 do_libpng() {
     ./configure --prefix=/usr --disable-static
@@ -2009,6 +2055,9 @@ PS1='\[\033[01;31m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 alias la='ls -lhA --color=auto'
 alias ..='cd ..'
 alias ...='cd ../..'
+
+# ログイン時にneofetchでシステム情報＋ペンギンを表示
+command -v neofetch &>/dev/null && neofetch
 RCEOF
 
 # ── ロケール / タイムゾーン / ホスト名 ───────────────────────
@@ -2019,6 +2068,16 @@ cat > /etc/locale.conf << LOCEOF
 LANG=__LOCALE_NAME__
 LC_ALL=__LOCALE_NAME__
 LOCEOF
+
+# ── コンソールフォント / キーマップ設定（文字化け対策）────────
+# Linuxコンソールは標準でLatin系フォントのため日本語が文字化けする。
+# kbd の ter-v4b（Terminus 16px）は ASCII + 拡張Latin に対応し安定。
+# 日本語表示はコンソールの限界のため、LANGはUTF-8を維持しつつ
+# フォントを正しく設定することで記号・ASCII部分の化けを防ぐ。
+cat > /etc/vconsole.conf << 'VCEOF'
+KEYMAP=jp106
+FONT=ter-v16b
+VCEOF
 
 echo "lfs" > /etc/hostname
 
@@ -2073,9 +2132,10 @@ hostname $(cat /etc/hostname 2>/dev/null || echo lfs)
 mount -o remount,rw / 2>/dev/null || true
 mkdir -p /var/log /var/run /var/lock
 touch /var/log/wtmp /var/log/btmp /var/run/utmp 2>/dev/null || true
-# 日本語キーボード設定
+# 日本語キーボード＋コンソールフォント設定（文字化け対策）
 [ -f /etc/vconsole.conf ] && source /etc/vconsole.conf
 [ -n "${KEYMAP}" ] && loadkeys ${KEYMAP} 2>/dev/null || true
+[ -n "${FONT}" ]   && setfont ${FONT}   2>/dev/null || true
 echo "システム初期化完了"
 RCSEOF
 chmod +x /etc/rc.d/init.d/rcS
