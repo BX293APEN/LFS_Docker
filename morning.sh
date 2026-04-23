@@ -261,6 +261,12 @@ menuentry "Linux From Scratch (EFI framebuffer)" {
     linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on
 __INITRD_LINE__
 }
+
+menuentry "Linux From Scratch (dev name boot)" {
+    set gfxpayload=text
+    linux /boot/__KERNEL__ root=/dev/sda2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
+__INITRD_LINE__
+}
 CFGEOF
 
 # sed でプレースホルダを実際の値に置換
