@@ -2050,15 +2050,24 @@ cat > /root/.bashrc << 'RCEOF'
 # Source global profile
 [[ -f /etc/profile ]] && source /etc/profile
 
-PS1='\[\033[01;31m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+PS1='\[\e[01;32m\]\u@\h\[\e[0m\]:\[\e[01;34m\]\w\[\e[0m\]\$ '
 
 alias la='ls -lhA --color=auto'
 alias ..='cd ..'
 alias ...='cd ../..'
+alias addcmd='nano /root/.bashrc'
 
-# ログイン時にneofetchでシステム情報＋ペンギンを表示
+
+# ログイン時にneofetchでシステム情報・ペンギンを表示
 command -v neofetch &>/dev/null && neofetch
 RCEOF
+
+# ── /root/.bash_profile ─────────────────────────────────────────────
+cat > /root/.bash_profile << 'PROFILEEOF'
+if [ -f /root/.bashrc ]; then
+    source /root/.bashrc
+fi
+PROFILEEOF
 
 # ── ロケール / タイムゾーン / ホスト名 ───────────────────────
 localedef -i ja_JP -f UTF-8 ja_JP.UTF-8 2>/dev/null || true
