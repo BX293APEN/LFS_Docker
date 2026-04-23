@@ -241,31 +241,30 @@ insmod fat
 terminal_output console
 terminal_input  console
 
-search --no-floppy --fs-uuid --set=root __ROOT_UUID__
+search --no-floppy --label --set=root lfs
 
 # USBブート用: rootwait + rootdelay でデバイス認識を待つ
 menuentry "Linux From Scratch" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=UUID=__ROOT_UUID__ rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
+    linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
 __INITRD_LINE__
 }
 
 menuentry "Linux From Scratch (verbose boot)" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=UUID=__ROOT_UUID__ rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 loglevel=7 ignore_loglevel
+    linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 loglevel=7 ignore_loglevel
 __INITRD_LINE__
 }
 
 menuentry "Linux From Scratch (EFI framebuffer)" {
     set gfxpayload=keep
-    linux /boot/__KERNEL__ root=UUID=__ROOT_UUID__ rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on
+    linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on
 __INITRD_LINE__
 }
 CFGEOF
 
 # sed でプレースホルダを実際の値に置換
 sed -i \
-    -e "s|__ROOT_UUID__|${ROOT_UUID}|g" \
     -e "s|__KERNEL__|${KERNEL}|g" \
     -e "s|__INITRD_LINE__|${INITRD_LINE}|g" \
     "${MOUNT_ROOT}/boot/grub/grub.cfg"
