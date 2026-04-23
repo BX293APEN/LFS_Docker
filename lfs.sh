@@ -2019,8 +2019,14 @@ id:3:initdefault:
 # システム初期化
 si:S:sysinit:/etc/rc.d/init.d/rcS
 
-# ランレベル3
+# ランレベル0: halt
+l0:0:wait:/etc/rc.d/rc 0
+# ランレベル1: シングルユーザー
+l1:1:wait:/etc/rc.d/rc 1
+# ランレベル3: マルチユーザー
 l3:3:wait:/etc/rc.d/rc 3
+# ランレベル6: reboot
+l6:6:wait:/etc/rc.d/rc 6
 
 # コンソール getty（tty1はrootで自動ログイン）
 c1:2345:respawn:/sbin/agetty --autologin root tty1 38400
@@ -2046,6 +2052,9 @@ hostname $(cat /etc/hostname 2>/dev/null || echo lfs)
 mount -o remount,rw / 2>/dev/null || true
 mkdir -p /var/log /var/run /var/lock
 touch /var/log/wtmp /var/log/btmp /var/run/utmp 2>/dev/null || true
+# 日本語キーボード設定
+[ -f /etc/vconsole.conf ] && source /etc/vconsole.conf
+[ -n "${KEYMAP}" ] && loadkeys ${KEYMAP} 2>/dev/null || true
 echo "システム初期化完了"
 RCSEOF
 chmod +x /etc/rc.d/init.d/rcS
@@ -2059,6 +2068,38 @@ for script in /etc/rc.d/rc${RUNLEVEL}.d/S*; do
 done
 RCEOF
 chmod +x /etc/rc.d/rc
+
+# ── /etc/rc.d/init.d/reboot / halt ───────────────────────────
+mkdir -p /etc/rc.d/rc0.d /etc/rc.d/rc6.d
+cat > /etc/rc.d/init.d/halt << 'HALTEOF'
+#!/bin/bash
+case "$1" in
+  start)
+    echo "システムを停止しています..."
+    sync
+    /sbin/halt -d -f -i -p
+    ;;
+esac
+HALTEOF
+chmod +x /etc/rc.d/init.d/halt
+
+cat > /etc/rc.d/init.d/reboot << 'REBOOTEOF'
+#!/bin/bash
+case "$1" in
+  start)
+    echo "システムを再起動しています..."
+    sync
+    /sbin/reboot -d -f -i
+    ;;
+esac
+REBOOTEOF
+chmod +x /etc/rc.d/init.d/reboot
+
+# ランレベル0(halt)とランレベル6(reboot)にリンク
+ln -sf ../init.d/halt   /etc/rc.d/rc0.d/S01halt
+ln -sf ../init.d/reboot /etc/rc.d/rc6.d/S01reboot
+
+
 
 echo ""
 echo "[CLI] ===== CLI ビルド完了！ ====="
