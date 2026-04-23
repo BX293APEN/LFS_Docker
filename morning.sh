@@ -152,6 +152,8 @@ echo "[INFO] フォーマット中..."
 # こうすることでマウント/アンマウント時のUUID変更を防ぐ
 ROOT_UUID="$(cat /proc/sys/kernel/random/uuid)"
 EFI_UUID="$(cat /proc/sys/kernel/random/uuid)"
+wipefs -a "$EFI_PART"
+wipefs -a "$ROOT_PART"
 mkfs.vfat -F32 -n "EFI"  "$EFI_PART"
 mkfs.ext4 -F   -L "lfs" -U "$ROOT_UUID" "$ROOT_PART"
 udevadm settle
