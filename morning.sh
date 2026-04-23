@@ -10,6 +10,13 @@
 #
 # 警告: 指定したデバイスは完全消去されます！
 # =============================================================================
+# ─────────────────────────────────────────────
+# ★ 起動デバイス設定
+#   ターゲットPCでUSBが sda として認識される場合 → BOOT_DEVICE=sda
+#   内蔵ディスクがある場合USBが sdb になるケースあり → BOOT_DEVICE=sdb
+#   起動しない場合はここを書き換えて morning.sh を再実行してください
+# ─────────────────────────────────────────────
+BOOT_DEVICE=sda
 
 set -euo pipefail
 
@@ -241,30 +248,22 @@ insmod fat
 terminal_output console
 terminal_input  console
 
-search --no-floppy --label --set=root lfs
-
-# USBブート用: rootwait + rootdelay でデバイス認識を待つ
+# デバイス名で起動（morning.sh の BOOT_DEVICE 変数で制御）
 menuentry "Linux From Scratch" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
+    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
 __INITRD_LINE__
 }
 
 menuentry "Linux From Scratch (verbose boot)" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 loglevel=7 ignore_loglevel
+    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 loglevel=7 ignore_loglevel
 __INITRD_LINE__
 }
 
 menuentry "Linux From Scratch (EFI framebuffer)" {
     set gfxpayload=keep
-    linux /boot/__KERNEL__ root=LABEL=lfs rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on
-__INITRD_LINE__
-}
-
-menuentry "Linux From Scratch (dev name boot)" {
-    set gfxpayload=text
-    linux /boot/__KERNEL__ root=/dev/sda2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
+    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on
 __INITRD_LINE__
 }
 CFGEOF
@@ -272,6 +271,7 @@ CFGEOF
 # sed でプレースホルダを実際の値に置換
 sed -i \
     -e "s|__KERNEL__|${KERNEL}|g" \
+    -e "s|__BOOT_DEVICE__|${BOOT_DEVICE}|g" \
     -e "s|__INITRD_LINE__|${INITRD_LINE}|g" \
     "${MOUNT_ROOT}/boot/grub/grub.cfg"
 

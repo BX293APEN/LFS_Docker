@@ -1915,7 +1915,6 @@ do_kernel() {
 
     # ── ファイルシステム ────────────────────────────
     scripts/config --enable CONFIG_EXT4_FS
-    scripts/config --enable CONFIG_EXT4_FS_LABEL
     scripts/config --enable CONFIG_VFAT_FS
     scripts/config --enable CONFIG_FAT_FS
     scripts/config --enable CONFIG_MSDOS_FS
