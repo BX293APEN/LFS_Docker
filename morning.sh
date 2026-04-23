@@ -148,11 +148,14 @@ fi
 # 3. フォーマット
 # ─────────────────────────────────────────────
 echo "[INFO] フォーマット中..."
+# UUIDを事前に生成して mkfs に渡す
+# こうすることでマウント/アンマウント時のUUID変更を防ぐ
+ROOT_UUID="$(cat /proc/sys/kernel/random/uuid)"
+EFI_UUID="$(cat /proc/sys/kernel/random/uuid)"
 mkfs.vfat -F32 -n "EFI"  "$EFI_PART"
-mkfs.ext4 -F   -L "lfs"  "$ROOT_PART"
-# mkfs 直後にカーネルのブロックデバイス情報を確定させる
+mkfs.ext4 -F   -L "lfs" -U "$ROOT_UUID" "$ROOT_PART"
 udevadm settle
-sleep 2
+echo "[INFO] 固定UUID ROOT=${ROOT_UUID}"
 
 # ─────────────────────────────────────────────
 # 4. マウント
@@ -177,13 +180,9 @@ tar xpf "$ROOTFS_TAR"       \
 # 6. fstab を UUID で書き換え
 # ─────────────────────────────────────────────
 echo "[INFO] fstab 生成中..."
-
-# blkid のキャッシュをクリアしてから取得
-udevadm settle
-blkid -c /dev/null "$ROOT_PART" > /dev/null 2>&1 || true
-ROOT_UUID=$(blkid -c /dev/null -s UUID -o value "$ROOT_PART")
-EFI_UUID=$(blkid  -c /dev/null -s UUID -o value "$EFI_PART")
-echo "[INFO] 取得したUUID ROOT=${ROOT_UUID} EFI=${EFI_UUID}"
+# UUID はフォーマット時に固定済みなのでそのまま使用
+EFI_UUID=$(blkid -c /dev/null -s UUID -o value "$EFI_PART")
+echo "[INFO] UUID ROOT=${ROOT_UUID} EFI=${EFI_UUID}"
 
 cat > "$MOUNT_ROOT/etc/fstab" << FSTAB_EOF
 # <fs>                                  <mountpoint>  <type>  <opts>            <dump> <pass>
@@ -313,14 +312,7 @@ VCEOF
 echo "[CHROOT] GRUB 完了"
 GRUB_EOF
 
-    # ── grub-install 後にUUIDを再取得してgrub.cfgを最終確定 ──
-    # --recheck 等でUUIDが変わる可能性があるため grub-install の後に上書きする
-    udevadm settle
-    ROOT_UUID_FINAL=$(blkid -c /dev/null -s UUID -o value "$ROOT_PART")
-    echo "[INFO] grub-install後のUUID: ${ROOT_UUID_FINAL}"
-    sed -i "s|root=UUID=[^ ]*|root=UUID=${ROOT_UUID_FINAL}|g" "${MOUNT_ROOT}/boot/grub/grub.cfg"
-    sed -i "s|set=root [^ ]*|set=root ${ROOT_UUID_FINAL}|g"   "${MOUNT_ROOT}/boot/grub/grub.cfg"
-
+    # UUID はフォーマット時に固定済みなので再取得不要
     # EFI パーティションに最終版 grub.cfg をコピー
     cp "${MOUNT_ROOT}/boot/grub/grub.cfg" "${MOUNT_ROOT}/boot/efi/EFI/BOOT/grub.cfg"
     echo "[INFO] grub.cfg → EFI パーティションにコピー完了"
