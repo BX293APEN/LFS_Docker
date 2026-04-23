@@ -150,6 +150,9 @@ fi
 echo "[INFO] フォーマット中..."
 mkfs.vfat -F32 -n "EFI"  "$EFI_PART"
 mkfs.ext4 -F   -L "lfs"  "$ROOT_PART"
+# mkfs 直後にカーネルのブロックデバイス情報を確定させる
+udevadm settle
+sleep 2
 
 # ─────────────────────────────────────────────
 # 4. マウント
@@ -175,8 +178,12 @@ tar xpf "$ROOTFS_TAR"       \
 # ─────────────────────────────────────────────
 echo "[INFO] fstab 生成中..."
 
-ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
-EFI_UUID=$(blkid  -s UUID -o value "$EFI_PART")
+# blkid のキャッシュをクリアしてから取得
+udevadm settle
+blkid -c /dev/null "$ROOT_PART" > /dev/null 2>&1 || true
+ROOT_UUID=$(blkid -c /dev/null -s UUID -o value "$ROOT_PART")
+EFI_UUID=$(blkid  -c /dev/null -s UUID -o value "$EFI_PART")
+echo "[INFO] 取得したUUID ROOT=${ROOT_UUID} EFI=${EFI_UUID}"
 
 cat > "$MOUNT_ROOT/etc/fstab" << FSTAB_EOF
 # <fs>                                  <mountpoint>  <type>  <opts>            <dump> <pass>
@@ -308,7 +315,8 @@ GRUB_EOF
 
     # ── grub-install 後にUUIDを再取得してgrub.cfgを最終確定 ──
     # --recheck 等でUUIDが変わる可能性があるため grub-install の後に上書きする
-    ROOT_UUID_FINAL=$(blkid -s UUID -o value "$ROOT_PART")
+    udevadm settle
+    ROOT_UUID_FINAL=$(blkid -c /dev/null -s UUID -o value "$ROOT_PART")
     echo "[INFO] grub-install後のUUID: ${ROOT_UUID_FINAL}"
     sed -i "s|root=UUID=[^ ]*|root=UUID=${ROOT_UUID_FINAL}|g" "${MOUNT_ROOT}/boot/grub/grub.cfg"
     sed -i "s|set=root [^ ]*|set=root ${ROOT_UUID_FINAL}|g"   "${MOUNT_ROOT}/boot/grub/grub.cfg"
