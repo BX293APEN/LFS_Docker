@@ -1589,6 +1589,14 @@ if ! flagged step5_cli_sources; then
     _cli_pkg "libpng-1.6.44.tar.xz"                    "${_URL_LIBPNG[@]}"
     _cli_pkg "freetype-2.13.3.tar.xz"                  "${_URL_FREETYPE[@]}"
     _cli_pkg "unifont-15.1.04.bdf.gz"                  "${_URL_UNIFONT[@]}"
+    # kbd: 日本語キーボード配列（loadkeys jp106）に必要
+    read -ra _URL_KBD <<< "${CLI_URL_KBD:-https://www.kernel.org/pub/linux/utils/kbd/kbd-2.6.4.tar.xz https://mirrors.edge.kernel.org/pub/linux/utils/kbd/kbd-2.6.4.tar.xz}"
+    _cli_pkg "kbd-2.6.4.tar.xz" "${_URL_KBD[@]}"
+    # which: Step4のwget-listに含まれない場合の補完
+    if [[ ! -s "which-2.21.tar.gz" ]]; then
+        read -ra _URL_WHICH <<< "${CLI_URL_WHICH:-https://ftp.gnu.org/gnu/which/which-2.21.tar.gz https://ftpmirror.gnu.org/which/which-2.21.tar.gz}"
+        _cli_pkg "which-2.21.tar.gz" "${_URL_WHICH[@]}"
+    fi
     # expat: Step2 で取得済みのはずだがなければ補完
     if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
         _cli_pkg "expat-2.6.2.tar.xz"                  "${_URL_EXPAT[@]}"
@@ -1817,6 +1825,20 @@ do_openssh() {
     ssh-keygen -A 2>/dev/null || true
 }
 build "OpenSSH" "openssh-9.9p1.tar.gz" do_openssh
+
+# ── kbd（日本語キーボード配列・loadkeys に必要）─────────────
+do_kbd() {
+    ./configure --prefix=/usr --disable-vlock
+    make && make install
+}
+build "kbd" "kbd-2.6.4.tar.xz" do_kbd
+
+# ── which ────────────────────────────────────────────────────
+do_which() {
+    ./configure --prefix=/usr
+    make && make install
+}
+build "which" "which-2.21.tar.gz" do_which
 
 # ── libpng (freetype の推奨依存) ─────────────────────────────
 do_libpng() {
