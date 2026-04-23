@@ -266,26 +266,19 @@ search --no-floppy --fs-uuid --set=root ${ROOT_UUID}
 
 menuentry "Linux From Scratch" {
     set gfxpayload=text
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
-        rootfstype=ext4 rootwait \
-        nomodeset console=tty0
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw rootfstype=ext4 rootwait nomodeset console=tty0
 ${INITRD_LINE}
 }
 
 menuentry "Linux From Scratch (verbose boot)" {
     set gfxpayload=text
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
-        rootfstype=ext4 rootwait \
-        nomodeset console=tty0 \
-        loglevel=7 ignore_loglevel
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw rootfstype=ext4 rootwait nomodeset console=tty0 loglevel=7 ignore_loglevel
 ${INITRD_LINE}
 }
 
 menuentry "Linux From Scratch (EFI framebuffer)" {
     set gfxpayload=keep
-    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw \
-        rootfstype=ext4 rootwait \
-        console=tty0 video=efifb:on
+    linux /boot/${KERNEL} root=UUID=${ROOT_UUID} rw rootfstype=ext4 rootwait console=tty0 video=efifb:on
 ${INITRD_LINE}
 }
 CFGEOF
