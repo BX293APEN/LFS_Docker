@@ -1245,6 +1245,18 @@ for pkg in libtool gdbm gperf expat inetutils less; do
         *)         ./configure --prefix=/usr ;;
     esac
     make && make install
+    # ── ping に cap_net_raw を付与（root以外でもICMPソケットを使えるように）
+    # setuid-root の代わりにケーパビリティを使う（より安全）
+    if [[ "$pkg" == "inetutils" ]]; then
+        if command -v setcap &>/dev/null; then
+            setcap cap_net_raw+ep /usr/bin/ping 2>/dev/null || true
+            echo "[BASE] ping: cap_net_raw を付与しました"
+        else
+            # setcap が無い場合は setuid-root にフォールバック
+            chmod u+s /usr/bin/ping 2>/dev/null || true
+            echo "[BASE] ping: setuid-root を設定しました（setcap 未検出）"
+        fi
+    fi
     cd ${SRC} && rm -rf "$dir"
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
@@ -1451,6 +1463,21 @@ do_udev() {
     DESTDIR=/ ninja install
 }
 build "Udev(systemd)" "$(ls ${SRC}/systemd-*.tar.* 2>/dev/null | head -1)" do_udev
+
+# ── udev: NIC を eth0 に固定命名するルール ────────────────────
+# systemd の "Predictable Network Interface Names" は使用しない。
+# 全ての NIC を従来の eth0, eth1, ... に固定する。
+mkdir -p /etc/udev/rules.d
+# udev の predictable naming (enp3s0 等) を無効化し eth0/eth1/... を維持する。
+# ルールファイルで NAME を固定するのは複数NICで衝突するため NG。
+# 代わりにカーネルコマンドライン net.ifnames=0 + biosdevname=0（morning.sh 側で追加済み）に任せる。
+# ドライバが eth* で登録した名前をそのまま使えば eth0/eth1 が自然に割り当たる。
+mkdir -p /etc/udev/rules.d
+# 念のため空ファイルで predictable naming ルールを上書き無効化
+touch /etc/udev/rules.d/80-net-name-slot.rules
+
+# カーネルコマンドラインにも net.ifnames=0 を後で morning.sh が追加するため
+# ここではルールファイルのみ作成する
 
 # ── Libpipeline (Man-DB の依存ライブラリ) ───────────────────
 do_libpipeline() {
@@ -1796,18 +1823,41 @@ build "iproute2" "iproute2-6.12.0.tar.xz" do_iproute2
 
 # ── dhcpcd ───────────────────────────────────────────────────
 do_dhcpcd() {
-    ./configure --prefix=/usr --sysconfdir=/etc \
-        --runstatedir=/run --dbdir=/var/lib/dhcpcd \
-        --libexecdir=/usr/lib/dhcpcd
+    # dhcpcd が使用する実行時ディレクトリを事前作成
+    mkdir -p /run/dhcpcd /var/lib/dhcpcd
+
+    # --privsep-user=dhcpcd で権限分離ユーザーを明示的に指定
+    # (LFS 環境では dhcpcd ユーザーを事前に作成しておく)
+    groupadd -g 52 dhcpcd 2>/dev/null || true
+    useradd  -c "dhcpcd privilege separation"              -d /var/lib/dhcpcd -g dhcpcd              -s /usr/bin/false -u 52 dhcpcd 2>/dev/null || true
+
+    ./configure --prefix=/usr --sysconfdir=/etc         --runstatedir=/run --dbdir=/var/lib/dhcpcd         --libexecdir=/usr/lib/dhcpcd         --privsep-user=dhcpcd
     make && make install
-    # 起動スクリプト
+
+    # /var/lib/dhcpcd の所有者を正しく設定
+    chown dhcpcd:dhcpcd /var/lib/dhcpcd 2>/dev/null || true
+    chmod 750           /var/lib/dhcpcd 2>/dev/null || true
+
+    # 起動スクリプト（eth0 のリンクアップ確認付き）
     mkdir -p /etc/rc.d/init.d
     cat > /etc/rc.d/init.d/dhcpcd << 'DHCPEOF'
 #!/bin/bash
+# dhcpcd init script
+# dhcpcd は引数なしで起動すると全NICを自動検出して DHCP を試みる
+# （/etc/dhcpcd.conf で除外設定も可能）
 case $1 in
-  start)  dhcpcd -q -b ;;
-  stop)   dhcpcd -x ;;
-  status) pgrep dhcpcd > /dev/null && echo "running" || echo "stopped" ;;
+  start)
+    # S10network スクリプトがリンクアップ済みのため、ここでは dhcpcd を起動するだけ
+    # -q: 静粛モード, -b: バックグラウンド（IP取得を待たずに返る）
+    dhcpcd -q -b
+    ;;
+  stop)
+    dhcpcd -x ;;
+  status)
+    pgrep dhcpcd > /dev/null && echo "dhcpcd: running" || echo "dhcpcd: stopped"
+    # 全NICのIPアドレスを表示
+    ip addr show | awk '/^[0-9]/{iface=$2} /inet /{print iface, $2}'
+    ;;
 esac
 DHCPEOF
     chmod +x /etc/rc.d/init.d/dhcpcd 2>/dev/null || true
@@ -1937,6 +1987,14 @@ do_kernel() {
     scripts/config --enable CONFIG_EFI
     scripts/config --enable CONFIG_EFI_STUB
     scripts/config --enable CONFIG_EFI_PARTITION
+
+    # ── ネットワークスタック（ping / dhcpcd に必須）──────────
+    scripts/config --enable CONFIG_NET            # ネットワーク全体スイッチ
+    scripts/config --enable CONFIG_INET           # TCP/IP（ICMP含む）
+    scripts/config --enable CONFIG_PACKET         # RAWソケット（pingの依存）
+    scripts/config --enable CONFIG_UNIX           # UNIXドメインソケット
+    scripts/config --enable CONFIG_NET_CORE       # コアネット機能
+    scripts/config --enable CONFIG_IPV6           # IPv6（不要なら削除可）
 
     # ── /dev 自動生成（必須）──────────────────────
     scripts/config --enable CONFIG_DEVTMPFS
@@ -2294,6 +2352,56 @@ INITTABEOF
 
 # ── /etc/rc.d/init.d/rcS (sysinit) ───────────────────────────
 mkdir -p /etc/rc.d/init.d /etc/rc.d/rc3.d
+
+# ── eth0 自動リンクアップ init スクリプト ──────────────────────
+cat > /etc/rc.d/init.d/network << 'NETEOF'
+#!/bin/bash
+# ネットワークインタフェース自動起動スクリプト
+# loopback 以外の全 NIC を自動検出して操作する（複数NIC対応）
+
+_each_nic() {
+    # /sys/class/net 配下から lo を除いた全インタフェースを列挙
+    for iface in /sys/class/net/*; do
+        name=$(basename "$iface")
+        [ "$name" = "lo" ] && continue
+        # 物理 NIC のみ（仮想ブリッジ・veth 等を除く）
+        # /sys/class/net/<name>/device が存在するものだけを対象にする
+        [ -e "/sys/class/net/${name}/device" ] || continue
+        echo "$name"
+    done
+}
+
+case $1 in
+  start)
+    # loopback を先に上げる
+    ip link set lo up 2>/dev/null || true
+
+    # 全物理NICをリンクアップ（eth0, eth1, enp3s0 等すべて対応）
+    for name in $(_each_nic); do
+        ip link set "$name" up 2>/dev/null             && echo "  [NET] $name: UP"             || echo "  [NET] $name: link up 失敗（無視）"
+    done
+    ;;
+  stop)
+    for name in $(_each_nic); do
+        ip link set "$name" down 2>/dev/null || true
+        echo "  [NET] $name: DOWN"
+    done
+    ;;
+  status)
+    for name in $(_each_nic); do
+        state=$(cat /sys/class/net/${name}/operstate 2>/dev/null || echo unknown)
+        addr=$(ip addr show "$name" 2>/dev/null | awk '/inet /{print $2}' | head -1)
+        echo "  $name: $state ${addr:-(no IP)}"
+    done
+    ;;
+esac
+NETEOF
+chmod +x /etc/rc.d/init.d/network
+
+# ランレベル3 で自動起動: network(S10) → dhcpcd(S20) の順に起動
+ln -sf ../init.d/network /etc/rc.d/rc3.d/S10network
+ln -sf ../init.d/dhcpcd  /etc/rc.d/rc3.d/S20dhcpcd
+
 cat > /etc/rc.d/init.d/rcS << 'RCSEOF'
 #!/bin/bash
 mountpoint -q /proc || mount -t proc proc /proc

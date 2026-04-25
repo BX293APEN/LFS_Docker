@@ -251,19 +251,19 @@ terminal_input  console
 # デバイス名で起動（morning.sh の BOOT_DEVICE 変数で制御）
 menuentry "Linux From Scratch" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0
+    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 net.ifnames=0 biosdevname=0
 __INITRD_LINE__
 }
 
 menuentry "Linux From Scratch (verbose boot)" {
     set gfxpayload=text
-    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 loglevel=7 ignore_loglevel
+    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 nomodeset console=tty0 loglevel=7 ignore_loglevel net.ifnames=0 biosdevname=0
 __INITRD_LINE__
 }
 
 menuentry "Linux From Scratch (EFI framebuffer)" {
     set gfxpayload=keep
-    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on
+    linux /boot/__KERNEL__ root=/dev/__BOOT_DEVICE__2 rw rootfstype=ext4 rootwait rootdelay=10 console=tty0 video=efifb:on net.ifnames=0 biosdevname=0
 __INITRD_LINE__
 }
 CFGEOF
