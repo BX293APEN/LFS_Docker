@@ -1905,7 +1905,12 @@ else
     cat > /usr/bin/neofetch << 'NEOFETCH_FALLBACK'
 #!/bin/bash
 # Minimal neofetch fallback (penguin ASCII art)
-_OS=$(grep ^PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "Linux From Scratch")
+if [ -f /etc/os-release ]; then
+    _OS=$(grep ^PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+else
+    _OS="Linux From Scratch"
+fi
+
 _KERNEL=$(uname -r)
 _UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
 _SHELL=$(basename "$SHELL")
@@ -1913,22 +1918,37 @@ _CPU=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | sed
 _MEM_TOTAL=$(awk '/MemTotal/{printf "%.0f", $2/1024}' /proc/meminfo)MiB
 _MEM_FREE=$(awk '/MemAvailable/{printf "%.0f", $2/1024}' /proc/meminfo)MiB
 
-C1='\033[1;34m'  # blue bold
-C2='\033[1;37m'  # white bold
+C_BODY='\033[1;30m'   # 身体・黒目 = 黒（bold black）
+C_EYE='\033[1;37m'    # 白目 = 白
+C_BEAK='\033[1;33m'   # くちばし = 黄色
+C_INFO='\033[1;37m'   # 情報ラベル = 白
 R='\033[0m'
 
-printf "${C1}        #####        ${R}\n"
-printf "${C1}       #######       ${R}  ${C2}OS:${R}     ${_OS}\n"
-printf "${C1}       ##O#O##       ${R}  ${C2}Kernel:${R} ${_KERNEL}\n"
-printf "${C1}       #######       ${R}  ${C2}Uptime:${R} ${_UPTIME}\n"
-printf "${C1}     ###########     ${R}  ${C2}Shell:${R}  ${_SHELL}\n"
-printf "${C1}    #############    ${R}  ${C2}CPU:${R}    ${_CPU}\n"
-printf "${C1}   ###############   ${R}  ${C2}Memory:${R} ${_MEM_FREE} / ${_MEM_TOTAL}\n"
-printf "${C1}   ####  #  #####   ${R}\n"
-printf "${C1}   ##############   ${R}\n"
-printf "${C1}    ############    ${R}\n"
-printf "${C1}      ########      ${R}\n"
+B=$C_BODY
+W=$C_EYE
+Y=$C_BEAK
+
+printf "${B}              .:@:.${R}\n"
+printf "${B}            :@@@@@@@:${R}\n"
+printf "${B}            @@@@@@@@@-${R}     ${C_INFO}OS:${R}     ${_OS}\n"
+printf "${B}    .:%%    @@@@@@@@@+.       @%%${R}  ${C_INFO}Kernel:${R} ${_KERNEL}\n"
+printf "${B}   *@@@%%+:  :@@@@@@@%%=: .=%%@@@@@@=${R}  ${C_INFO}Uptime:${R} ${_UPTIME}\n"
+printf "${B}  :@@@@@@##@@@@@@@@@%%*+%%@%%+@@@@@@@+${R}  ${C_INFO}Shell:${R}  ${_SHELL}\n"
+printf "${B}  @@#${W}####${B}+@@@@@@@%%:${W}######${B}=@@@@@@@@@-${R}  ${C_INFO}CPU:${R}    ${_CPU}\n"
+printf "${B} *@%%${W}######${B}.@@@@@#${W}#########${B}-@@@@@@@@#.${R}  ${C_INFO}Memory:${R} ${_MEM_FREE} / ${_MEM_TOTAL}\n"
+printf "${B} %%@-${W}#${B}.@${B}=${B}:${W}##${B}+@@@@-${W}###${B}%%@${B}:${B}=${W}###${B}*@#*+=-+#:${R}\n"
+printf "${B} @@.${W}#${B}@@*${B}=${B}:${W}#${B}-%%%%**-${W}##${B}%%@@%%${B}*${B}*${W}###${B}#=-${R}\n"
+printf "${B} @@-${W}#${B}@@@@+.-${Y}...${B}:=.${W}#${B}%%@@@@%%${W}###${B}#-${R}\n"
+printf "${B} %%@%%${W}##${B}*#:${Y}.o.....o...${B}-%%@+${W}###${B}#@+    -:${R}\n"
+printf "${B} +@@*${W}#${Y}....................${B}+@@@@@@@@+${R}\n"
+printf "${B}  @%%:${Y}....................._:${B}@@@@@@@=.${R}\n"
+printf "${B}  .=:${Y}...............__*-=\`\.${B}=@@@@@@#=.${R}\n"
+printf "${B}   :+:${Y}....:==*__*-=\`\:..==-:${B}#@@@@@%%+:${R}\n"
+printf "${B}     .--=-:  ${Y}+..::.....-:    ${B}=%%@*=:${R}\n"
+printf "${B}              :........-${R}\n"
+printf "${B}                .:...--.${R}\n"
 printf "\n"
+
 NEOFETCH_FALLBACK
     chmod +x /usr/bin/neofetch
     echo "[CLI] neofetch フォールバック版をインストール"
