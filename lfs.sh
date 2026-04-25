@@ -2516,6 +2516,115 @@ echo "    [1] ping有効化: CONFIG_INET/PACKET + sysctl ping_group_range"
 echo "    [2] dhcpcd修正: dhcpcd.conf(allowinterfaces) + rc3.d/S30dhcpcd"
 echo "    [3] 全NIC自動リンクアップ: udev rules + rcS内 ip link set up"
 echo "    [4] NIC名固定: net.ifnames=0 biosdevname=0 は morning.sh のgrub.cfgに追記済み"
+
+# ── /etc/rc.d/init.d/firstboot ───────────────────────────────
+# Docker の overlayfs では setuid ビットが tar.gz 経由で消える場合がある。
+# 初回起動時にここで ping を再ビルドまたは権限を再設定して確実に修正する。
+mkdir -p /etc/rc.d/init.d /etc/rc.d/rc3.d
+cat > /etc/rc.d/init.d/firstboot << 'FIRSTBOOTEOF'
+#!/bin/bash
+# /etc/rc.d/init.d/firstboot
+# 初回起動時のみ実行。ping の setuid / CAP_NET_RAW を確実に設定する。
+
+DONE_FLAG=/etc/firstboot.done
+[ -f "$DONE_FLAG" ] && exit 0
+
+echo "[firstboot] 初回起動セットアップ開始..."
+
+# ── 1. ping の権限を修正 ──────────────────────────────────────
+fix_ping() {
+    local bin="$1"
+    [ -x "$bin" ] || return 0
+
+    # CAP_NET_RAW が使えれば setuid 不要（overlayfs でも消えない）
+    if command -v setcap &>/dev/null; then
+        setcap cap_net_raw+ep "$bin" 2>/dev/null && {
+            echo "[firstboot] setcap cap_net_raw+ep: $bin"
+            return 0
+        }
+    fi
+
+    # fallback: setuid root
+    chmod 4755 "$bin" 2>/dev/null && \
+        echo "[firstboot] chmod 4755 (setuid): $bin"
+}
+
+fix_ping /usr/bin/ping
+fix_ping /usr/bin/ping6
+
+# ── 2. inetutils を /sources から再ビルド（setuid が消えていた場合の完全修正）
+SRC=/sources
+INETUTILS_TAR=$(ls "${SRC}"/inetutils-*.tar.* 2>/dev/null | head -1)
+
+if [ -n "$INETUTILS_TAR" ]; then
+    echo "[firstboot] inetutils tarball 発見: ${INETUTILS_TAR##*/}"
+
+    # 現在の ping が正常に動くか確認（lo への ping で判定）
+    if ping -c1 -W1 127.0.0.1 &>/dev/null; then
+        echo "[firstboot] ping 動作確認 OK。再ビルドをスキップします。"
+    else
+        echo "[firstboot] ping が動かないため inetutils を再ビルドします..."
+
+        TMPDIR=$(mktemp -d /tmp/firstboot-inetutils-XXXXXX)
+        tar -xf "$INETUTILS_TAR" -C "$TMPDIR" 2>/dev/null
+        SRCDIR=$(ls -d "$TMPDIR"/*/ 2>/dev/null | head -1)
+
+        if [ -n "$SRCDIR" ]; then
+            cd "$SRCDIR"
+            ./configure --prefix=/usr --bindir=/usr/bin \
+                --localstatedir=/var \
+                --disable-logger --disable-whois --disable-rcp \
+                --disable-rexec --disable-rlogin --disable-rsh \
+                --disable-servers \
+                --enable-ping --enable-ping6 \
+                > /tmp/firstboot-inetutils-configure.log 2>&1 && \
+            make -j"$(nproc)" \
+                >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
+            make install \
+                >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
+            echo "[firstboot] inetutils 再ビルド完了" || \
+            echo "[firstboot][WARN] 再ビルド失敗。ログ: /tmp/firstboot-inetutils-configure.log"
+
+            # 再ビルド後に権限を設定
+            fix_ping /usr/bin/ping
+            fix_ping /usr/bin/ping6
+        else
+            echo "[firstboot][WARN] tarball 展開失敗"
+        fi
+
+        rm -rf "$TMPDIR"
+    fi
+else
+    echo "[firstboot] inetutils tarball なし（/sources）。権限設定のみで続行。"
+fi
+
+# ── 3. sysctl: ping_group_range を確実に適用 ─────────────────
+# rcS では /proc がマウント直後で失敗することがあるためここで再適用
+echo "[firstboot] sysctl ping_group_range を適用..."
+sysctl -w net.ipv4.ping_group_range="0 2147483647" 2>/dev/null && \
+    echo "[firstboot] ping_group_range 設定完了" || \
+    echo "[firstboot][WARN] sysctl 失敗（inetutils-ping は影響なし）"
+
+# sysctl.d の設定ファイルも適用（再起動後も有効にするため）
+sysctl -p /etc/sysctl.d/10-network.conf 2>/dev/null || true
+
+# ── 4. 動作確認 ──────────────────────────────────────────────
+echo "[firstboot] ping 動作確認中..."
+if ping -c1 -W2 127.0.0.1 &>/dev/null; then
+    echo "[firstboot] ping 127.0.0.1 → OK"
+else
+    echo "[firstboot][WARN] ping 127.0.0.1 が失敗。カーネル CONFIG_INET を確認してください。"
+fi
+
+# ── 完了フラグ ────────────────────────────────────────────────
+touch "$DONE_FLAG"
+echo "[firstboot] 完了。次回起動からこのスクリプトはスキップされます。"
+FIRSTBOOTEOF
+
+chmod +x /etc/rc.d/init.d/firstboot
+# dhcpcd (S30) より前、ネットワーク起動前に実行
+ln -sf ../init.d/firstboot /etc/rc.d/rc3.d/S05firstboot
+echo "[CLI] firstboot スクリプト登録完了 → /etc/rc.d/rc3.d/S05firstboot"
 CLIEOF
 
     sed -i \
