@@ -69,6 +69,7 @@ services:
       - CLI_URL_LIBPIPELINE=${CLI_URL_LIBPIPELINE}
       - CLI_URL_KBD=${CLI_URL_KBD}
       - CLI_URL_WHICH=${CLI_URL_WHICH}
+      - CLI_URL_WGET=${CLI_URL_WGET}
       - CLI_URL_NEOFETCH=${CLI_URL_NEOFETCH}
 
     command:
