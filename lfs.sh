@@ -1926,35 +1926,49 @@ _CPU=$(grep "model name" /proc/cpuinfo 2>/dev/null | head -1 | cut -d: -f2 | sed
 _MEM_TOTAL=$(awk '/MemTotal/{printf "%.0f", $2/1024}' /proc/meminfo)MiB
 _MEM_FREE=$(awk '/MemAvailable/{printf "%.0f", $2/1024}' /proc/meminfo)MiB
 
-C_BODY='\033[1;30m'   # 身体・黒目 = 黒（bold black）
-C_EYE='\033[1;37m'    # 白目 = 白
-C_BEAK='\033[1;33m'   # くちばし = 黄色
-C_INFO='\033[1;37m'   # 情報ラベル = 白
+C_BODY='\033[1;30m'
+C_EYE='\033[1;37m'
+C_BEAK='\033[1;33m'
+C_INFO='\033[1;37m'
 R='\033[0m'
 
 B=$C_BODY
 W=$C_EYE
 Y=$C_BEAK
 
-printf "${B}              .:@:.${R}                         \n"
-printf "${B}            :@@@@@@@:${R}                       \n"
-printf "${B}            @@@@@@@@@-${R}                      ${C_INFO}OS:${R}     ${_OS}\n"
-printf "${B}    .:%%    @@@@@@@@@+.       @%%${R}           ${C_INFO}Kernel:${R} ${_KERNEL}\n"
-printf "${B}   *@@@%%+:  :@@@@@@@%%=: .=%%@@@@@@=${R}       ${C_INFO}Uptime:${R} ${_UPTIME}\n"
-printf "${B}  :@@@@@@##@@@@@@@@@%%*+%%@%%+@@@@@@@+${R}      ${C_INFO}Shell:${R}  ${_SHELL}\n"
-printf "${B}  @@#${W}####${B}+@@@@@@@%%:${W}######${B}=@@@@@@@@@-${R}       ${C_INFO}CPU:${R}    ${_CPU}\n"
-printf "${B} *@%%${W}######${B}.@@@@@#${W}#########${B}-@@@@@@@@#.${R}      ${C_INFO}Memory:${R} ${_MEM_FREE} / ${_MEM_TOTAL}\n"
-printf "${B} %%@-${W}#${B}.@${B}=${B}:${W}##${B}+@@@@-${W}###${B}%%@${B}:${B}=${W}###${B}*@#*+=-+#:${R}     \n"
-printf "${B} @@.${W}#${B}@@*${B}=${B}:${W}#${B}-%%%%**-${W}##${B}%%@@%%${B}*${B}*${W}###${B}#=-${R}         \n"
-printf "${B} @@-${W}#${B}@@@@+.-${Y}...${B}:=.${W}#${B}%%@@@@%%${W}###${B}#-${R}            \n"
-printf "${B} %%@%%${W}##${B}*#:${Y}.o.....o...${B}-%%@+${W}###${B}#@+    -:${R}     \n"
-printf "${B} +@@*${W}#${Y}....................${B}+@@@@@@@@+${R}        \n"
-printf "${B}  @%%:${Y}....................._:${B}@@@@@@@=.${R}      \n"
-printf "${B}  .=:${Y}...............__*-=\`\.${B}=@@@@@@#=.${R}     \n"
-printf "${B}   :+:${Y}....:==*__*-=\`\:..==-:${B}#@@@@@%%+:${R}     \n"
-printf "${B}     .--=-:  ${Y}+..::.....-:    ${B}=%%@*=:${R}        \n"
-printf "${B}              :........-${R}                    \n"
-printf "${B}                .:...--.${R}                    \n"
+# 見た目の幅でパディングする関数
+# 使い方: pad "カラー付き文字列" 目標表示幅
+pad() {
+  local str="$1"
+  local width="$2"
+  # ANSIエスケープを除去して表示幅を測る
+  local plain
+  plain=$(printf '%b' "$str" | sed 's/\x1b\[[0-9;]*m//g')
+  local pad_n=$(( width - ${#plain} ))
+  printf '%b%*s' "$str" "$pad_n" ""
+}
+
+ART_W=50  # アスキーアート列の表示幅（実際の最長行に合わせて調整）
+
+pad "${B}              .:@:.${R}"                                                       $ART_W; printf "                         \n"
+pad "${B}            :@@@@@@@:${R}"                                                     $ART_W; printf "                       \n"
+pad "${B}            @@@@@@@@@-${R}"                                                    $ART_W; printf "  ${C_INFO}OS:${R}     ${_OS}\n"
+pad "${B}    .:%     @@@@@@@@@+.       @%${R}"                                          $ART_W; printf "  ${C_INFO}Kernel:${R} ${_KERNEL}\n"
+pad "${B}   *@@@%+:  :@@@@@@@%=: .=%@@@@@@=${R}"                                       $ART_W; printf "  ${C_INFO}Uptime:${R} ${_UPTIME}\n"
+pad "${B}  :@@@@@@##@@@@@@@@@%*+%@%+@@@@@@@+${R}"                                      $ART_W; printf "  ${C_INFO}Shell:${R}  ${_SHELL}\n"
+pad "${B}  @@#${W}####${B}+@@@@@@@%:${W}######${B}=@@@@@@@@@-${R}"                     $ART_W; printf "  ${C_INFO}CPU:${R}    ${_CPU}\n"
+pad "${B} *@%${W}######${B}.@@@@@#${W}#########${B}-@@@@@@@@#.${R}"                    $ART_W; printf "  ${C_INFO}Memory:${R} ${_MEM_FREE} / ${_MEM_TOTAL}\n"
+pad "${B} %@-${W}#${B}.@${B}=${B}:${W}##${B}+@@@@-${W}###${B}%@${B}:${B}=${W}###${B}*@#*+=-+#:${R}" $ART_W; printf "     \n"
+pad "${B} @@.${W}#${B}@@*${B}=${B}:${W}#${B}-%%%%**-${W}##${B}%@@%${B}*${B}*${W}###${B}#=-${R}"     $ART_W; printf "         \n"
+pad "${B} @@-${W}#${B}@@@@+.-${Y}...${B}:=.${W}#${B}%@@@@%${W}###${B}#-${R}"          $ART_W; printf "            \n"
+pad "${B} %@%${W}##${B}*#:${Y}.o.....o...${B}-%@+${W}###${B}#@+    -:${R}"            $ART_W; printf "     \n"
+pad "${B} +@@*${W}#${Y}....................${B}+@@@@@@@@+${R}"                          $ART_W; printf "        \n"
+pad "${B}  @%:${Y}....................._:${B}@@@@@@@=.${R}"                             $ART_W; printf "      \n"
+pad "${B}  .=:${Y}...............__*-=\`\\.${B}=@@@@@@#=.${R}"                         $ART_W; printf "     \n"
+pad "${B}   :+:${Y}....:==*__*-=\`\\:..==-:${B}#@@@@@%+:${R}"                          $ART_W; printf "     \n"
+pad "${B}     .--=-:  ${Y}+..::.....-:    ${B}=%@*=:${R}"                              $ART_W; printf "        \n"
+pad "${B}              :........-${R}"                                                  $ART_W; printf "                    \n"
+pad "${B}                .:...--.${R}"                                                  $ART_W; printf "                    \n"
 printf "\n"
 
 NEOFETCH_FALLBACK
