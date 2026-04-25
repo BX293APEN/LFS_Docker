@@ -1990,6 +1990,37 @@ do_kernel() {
     scripts/config --enable CONFIG_NLS_ISO8859_1
     scripts/config --enable CONFIG_NLS_UTF8
 
+    # ── イーサネットドライバ ────────────────────────
+    # 必要なドライバをコメントアウトで用意。使用するNICに合わせて
+    # 該当行のコメントを外して有効化してください。
+    # （有効化後は make olddefconfig → make -j... を再実行すること）
+    #
+    # 汎用・準仮想化
+    #scripts/config --enable CONFIG_VIRTIO_NET          # QEMU/KVM virtio-net
+    #scripts/config --enable CONFIG_VMXNET3             # VMware VMXNET3
+    #
+    # Intel 系
+    #scripts/config --enable CONFIG_E1000               # Intel PRO/1000 (82540/82545 等)
+    #scripts/config --enable CONFIG_E1000E              # Intel PRO/1000 PCIe (82566/82574 等)
+    #scripts/config --enable CONFIG_IGB                 # Intel I210/I350/I354 GbE
+    #scripts/config --enable CONFIG_IXGBE               # Intel 82598/82599 10GbE
+    #scripts/config --enable CONFIG_I40E                # Intel XL710/X710 40GbE
+    #
+    # Realtek 系
+    #scripts/config --enable CONFIG_8139CP              # Realtek RTL-8139C+
+    #scripts/config --enable CONFIG_8139TOO             # Realtek RTL-8139 (古い型番)
+    #scripts/config --enable CONFIG_R8169               # Realtek RTL8111/8168/8411 GbE (最多)
+    #
+    # Broadcom 系
+    #scripts/config --enable CONFIG_BNX2                # Broadcom NetXtreme II GbE
+    #scripts/config --enable CONFIG_TIGON3              # Broadcom NetXtreme BCM570x GbE
+    #scripts/config --enable CONFIG_BNX2X               # Broadcom NetXtreme II 10GbE
+    #
+    # その他
+    #scripts/config --enable CONFIG_ATL1                # Attansic/Qualcomm Atheros L1
+    #scripts/config --enable CONFIG_ATL2                # Attansic/Qualcomm Atheros L2
+    #scripts/config --enable CONFIG_ATSE1G              # Qualcomm Atheros AR8131/AR8151 GbE
+
     # ★ 依存関係を自動解決（これがないと上記の --enable が
     #    依存先未解決のまま無効化される。scripts/config の後は必須）
     make olddefconfig
@@ -2057,6 +2088,141 @@ alias ..='cd ..'
 alias ...='cd ../..'
 alias addcmd='nano /root/.bashrc'
 
+# ── パッケージビルド関数 ──────────────────────────────────────
+# 使い方:
+#   build <パッケージ名> [./configure のフラグ...] [ミラーURL]
+#
+# 例:
+#   build nano
+#   build nano --enable-utf8 --disable-nls
+#   build nano --enable-utf8 https://example.com/nano-8.3.tar.xz
+#
+# 動作:
+#   1. /sources/<pkg>*.tar.* を探してそのまま展開（既存）
+#   2. 見つからない場合、ミラーURL 引数があればそこから wget で取得
+#   3. configure フラグを付けて ./configure → make → make install
+build() {
+    local pkg="$1"; shift
+    if [[ -z "$pkg" ]]; then
+        echo "使い方: build <パッケージ名> [configureフラグ...] [ミラーURL]" >&2
+        return 1
+    fi
+
+    local SRC=/sources
+    local configure_flags=()
+    local mirror_url=""
+
+    # 引数を解析: URL（http/https）はミラー、それ以外は configure フラグ
+    for arg in "$@"; do
+        if [[ "$arg" == http://* || "$arg" == https://* || "$arg" == ftp://* ]]; then
+            mirror_url="$arg"
+        else
+            configure_flags+=("$arg")
+        fi
+    done
+
+    # tarball を探す
+    local tarball
+    tarball=$(ls "${SRC}/${pkg}"*.tar.* 2>/dev/null | head -1)
+
+    if [[ -z "$tarball" ]]; then
+        if [[ -n "$mirror_url" ]]; then
+            echo "[BUILD] ${pkg}: ソース未発見。ミラーから取得します: ${mirror_url}"
+            wget -q --show-progress -P "${SRC}" "${mirror_url}" || {
+                echo "[ERROR] ダウンロード失敗: ${mirror_url}" >&2; return 1
+            }
+            tarball=$(ls "${SRC}/${pkg}"*.tar.* 2>/dev/null | head -1)
+        fi
+        if [[ -z "$tarball" ]]; then
+            echo "[ERROR] /sources に ${pkg}*.tar.* が見つかりません。" >&2
+            echo "        tarball を /sources に置くか、ミラーURLを第2引数以降に指定してください。" >&2
+            return 1
+        fi
+    fi
+
+    echo "[BUILD] $(date '+%H:%M:%S') ${pkg} (${tarball##*/})"
+    [[ ${#configure_flags[@]} -gt 0 ]] && echo "[BUILD] configureフラグ: ${configure_flags[*]}"
+
+    local tmpdir; tmpdir=$(mktemp -d /tmp/build-XXXXXX)
+    trap "rm -rf '${tmpdir}'" RETURN
+
+    tar -xf "${tarball}" -C "${tmpdir}"
+    local srcdir; srcdir=$(ls -d "${tmpdir}"/*/  2>/dev/null | head -1)
+    if [[ -z "$srcdir" ]]; then
+        echo "[ERROR] tarball 展開後にディレクトリが見つかりません" >&2; return 1
+    fi
+    cd "${srcdir}"
+
+    if [[ -f configure ]]; then
+        ./configure --prefix=/usr "${configure_flags[@]}" || {
+            echo "[ERROR] configure 失敗" >&2; return 1
+        }
+    elif [[ -f CMakeLists.txt ]]; then
+        echo "[BUILD] CMake を使用します"
+        mkdir -p build && cd build
+        cmake -DCMAKE_INSTALL_PREFIX=/usr "${configure_flags[@]}" .. || {
+            echo "[ERROR] cmake 失敗" >&2; return 1
+        }
+    elif [[ -f meson.build ]]; then
+        echo "[BUILD] Meson を使用します"
+        mkdir -p build
+        meson setup --prefix=/usr "${configure_flags[@]}" build || {
+            echo "[ERROR] meson setup 失敗" >&2; return 1
+        }
+        cd build
+        ninja && ninja install
+        echo "[BUILD] ${pkg} インストール完了"
+        return 0
+    else
+        echo "[WARN] configure / CMakeLists.txt / meson.build が見つかりません。make のみ試みます"
+    fi
+
+    make -j"$(nproc)" && make install || {
+        echo "[ERROR] make / make install 失敗" >&2; return 1
+    }
+    echo "[BUILD] ${pkg} インストール完了"
+}
+
+# ── パッケージアップデート関数 ────────────────────────────────
+# 使い方:
+#   update <パッケージ名> [ミラーURL]
+#
+# 例:
+#   update nano
+#   update nano https://example.com/nano-8.4.tar.xz
+#
+# 動作:
+#   1. ミラーURLがあれば新 tarball を /sources に wget
+#   2. 古い tarball（同名パッケージの旧バージョン）を削除
+#   3. build 関数で再ビルド・再インストール
+update() {
+    local pkg="$1"; shift
+    if [[ -z "$pkg" ]]; then
+        echo "使い方: update <パッケージ名> [ミラーURL]" >&2
+        return 1
+    fi
+
+    local SRC=/sources
+    local mirror_url="${1:-}"
+
+    if [[ -n "$mirror_url" ]]; then
+        echo "[UPDATE] ${pkg}: ミラーから新バージョンを取得: ${mirror_url}"
+        # 旧 tarball を削除してから新バージョンを取得
+        local old_tarballs
+        old_tarballs=$(ls "${SRC}/${pkg}"*.tar.* 2>/dev/null)
+        wget -q --show-progress -P "${SRC}" "${mirror_url}" || {
+            echo "[ERROR] ダウンロード失敗: ${mirror_url}" >&2; return 1
+        }
+        # 旧 tarball が新取得 tarball と異なる場合のみ削除
+        local new_tarball; new_tarball=$(ls -t "${SRC}/${pkg}"*.tar.* 2>/dev/null | head -1)
+        for old in ${old_tarballs}; do
+            [[ "$old" != "$new_tarball" ]] && rm -f "$old" && echo "[UPDATE] 旧 tarball 削除: ${old##*/}"
+        done
+    fi
+
+    echo "[UPDATE] ${pkg}: 再ビルド・再インストールします"
+    build "$pkg"
+}
 
 # ログイン時にneofetchでシステム情報・ペンギンを表示
 command -v neofetch &>/dev/null && neofetch
