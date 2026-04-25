@@ -2009,7 +2009,7 @@ do_kernel() {
     # Realtek 系
     #scripts/config --enable CONFIG_8139CP              # Realtek RTL-8139C+
     #scripts/config --enable CONFIG_8139TOO             # Realtek RTL-8139 (古い型番)
-    #scripts/config --enable CONFIG_R8169               # Realtek RTL8111/8168/8411 GbE (最多)
+    scripts/config --enable CONFIG_R8169               # Realtek RTL8111/8168/8411 GbE (最多)
     #
     # Broadcom 系
     #scripts/config --enable CONFIG_BNX2                # Broadcom NetXtreme II GbE
