@@ -2306,8 +2306,14 @@ build() {
     fi
     cd "${srcdir}"
 
+    if [[ -n "$extra_cflags" ]]; then
+        export CFLAGS="$extra_cflags" CXXFLAGS="$extra_cflags"
+        echo "[BUILD] CFLAGS: $extra_cflags"
+    fi
+
     if [[ -f configure ]]; then
         ./configure --prefix=/usr "${configure_flags[@]}" || {
+            unset CFLAGS CXXFLAGS
             echo "[ERROR] configure 失敗" >&2; return 1
         }
     elif [[ -f CMakeLists.txt ]]; then
@@ -2330,13 +2336,11 @@ build() {
         echo "[WARN] configure / CMakeLists.txt / meson.build が見つかりません。make のみ試みます"
     fi
 
-    [[ -n "$extra_cflags" ]] && export CFLAGS="$extra_cflags" CXXFLAGS="$extra_cflags" \
-        && echo "[BUILD] CFLAGS: $extra_cflags"
     make -j"${jobs}" && make install || {
-        [[ -n "$extra_cflags" ]] && unset CFLAGS CXXFLAGS
+        unset CFLAGS CXXFLAGS
         echo "[ERROR] make / make install 失敗" >&2; return 1
     }
-    [[ -n "$extra_cflags" ]] && unset CFLAGS CXXFLAGS
+    unset CFLAGS CXXFLAGS
     echo "[BUILD] ${pkg} インストール完了"
 }
 
