@@ -2240,9 +2240,20 @@ build() {
     local configure_flags=()
     local mirror_url=""
 
-    # 引数を解析: URL（http/https）はミラー、それ以外は configure フラグ
+    local extra_cflags=""
+    local jobs="$(nproc)"
+
+    # 引数を解析:
+    #   CFLAGS=...  → コンパイルフラグ上書き
+    #   JOBS=N      → make の並列数指定
+    #   URL         → ミラー
+    #   それ以外    → configure フラグ
     for arg in "$@"; do
-        if [[ "$arg" == http://* || "$arg" == https://* || "$arg" == ftp://* ]]; then
+        if [[ "$arg" == CFLAGS=* ]]; then
+            extra_cflags="${arg#CFLAGS=}"
+        elif [[ "$arg" == JOBS=* ]]; then
+            jobs="${arg#JOBS=}"
+        elif [[ "$arg" == http://* || "$arg" == https://* || "$arg" == ftp://* ]]; then
             mirror_url="$arg"
         else
             configure_flags+=("$arg")
@@ -2305,9 +2316,13 @@ build() {
         echo "[WARN] configure / CMakeLists.txt / meson.build が見つかりません。make のみ試みます"
     fi
 
-    make -j"$(nproc)" && make install || {
+    [[ -n "$extra_cflags" ]] && export CFLAGS="$extra_cflags" CXXFLAGS="$extra_cflags" \
+        && echo "[BUILD] CFLAGS: $extra_cflags"
+    make -j"${jobs}" && make install || {
+        [[ -n "$extra_cflags" ]] && unset CFLAGS CXXFLAGS
         echo "[ERROR] make / make install 失敗" >&2; return 1
     }
+    [[ -n "$extra_cflags" ]] && unset CFLAGS CXXFLAGS
     echo "[BUILD] ${pkg} インストール完了"
 }
 
@@ -2571,40 +2586,27 @@ if [ -n "$INETUTILS_TAR" ]; then
     else
         echo "[firstboot] ping が動かないため inetutils を再ビルドします..."
 
-        TMPDIR=$(mktemp -d /tmp/firstboot-inetutils-XXXXXX)
-        tar -xf "$INETUTILS_TAR" -C "$TMPDIR" 2>/dev/null
-        SRCDIR=$(ls -d "$TMPDIR"/*/ 2>/dev/null | head -1)
+        # /root/.bashrc の build 関数を使って再ビルド
+        # CFLAGS=-march=x86-64: GCC が AVX 等のホスト固有命令を使い SIGILL で
+        # クラッシュするのを防ぐ。JOBS=1: 並列ビルドによる ICE を回避。
+        source /root/.bashrc 2>/dev/null
+        build inetutils \
+            "CFLAGS=-O2 -march=x86-64 -mtune=generic" \
+            JOBS=1 \
+            --bindir=/usr/bin \
+            --localstatedir=/var \
+            --disable-logger --disable-whois --disable-rcp \
+            --disable-rexec --disable-rlogin --disable-rsh \
+            --disable-servers \
+            --enable-ping --enable-ping6 \
+            https://ftp.gnu.org/gnu/inetutils/inetutils-2.5.tar.xz \
+            > /tmp/firstboot-inetutils-build.log 2>&1 \
+            && echo "[firstboot] inetutils 再ビルド完了" \
+            || echo "[firstboot][WARN] 再ビルド失敗。ログ: /tmp/firstboot-inetutils-build.log"
 
-        if [ -n "$SRCDIR" ]; then
-            cd "$SRCDIR"
-            # GCC が Docker コンテナ外でビルドされた場合、AVX 等のホスト固有命令を
-            # コンテナが実行できず SIGILL (Illegal instruction) でクラッシュする。
-            # -march=x86-64 で x86-64 ベースライン命令のみに制限して回避する。
-            export CFLAGS="-O2 -march=x86-64 -mtune=generic"
-            export CXXFLAGS="$CFLAGS"
-            ./configure --prefix=/usr --bindir=/usr/bin \
-                --localstatedir=/var \
-                --disable-logger --disable-whois --disable-rcp \
-                --disable-rexec --disable-rlogin --disable-rsh \
-                --disable-servers \
-                --enable-ping --enable-ping6 \
-                > /tmp/firstboot-inetutils-configure.log 2>&1 && \
-            make -j"$(nproc)" \
-                >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
-            make install \
-                >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
-            echo "[firstboot] inetutils 再ビルド完了" || \
-            echo "[firstboot][WARN] 再ビルド失敗。ログ: /tmp/firstboot-inetutils-configure.log"
-            unset CFLAGS CXXFLAGS
-
-            # 再ビルド後に権限を設定
-            fix_ping /usr/bin/ping
-            fix_ping /usr/bin/ping6
-        else
-            echo "[firstboot][WARN] tarball 展開失敗"
-        fi
-
-        rm -rf "$TMPDIR"
+        # 再ビルド後に権限を設定
+        fix_ping /usr/bin/ping
+        fix_ping /usr/bin/ping6
     fi
 else
     echo "[firstboot] inetutils tarball なし（/sources）。権限設定のみで続行。"
