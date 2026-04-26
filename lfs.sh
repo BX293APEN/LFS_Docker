@@ -2361,6 +2361,12 @@ cat > /root/.bash_profile << 'PROFILEEOF'
 if [ -f /root/.bashrc ]; then
     source /root/.bashrc
 fi
+
+refirstboot(){
+    rm -rf /etc/firstboot.done
+    /etc/rc.d/init.d/firstboot
+}
+
 PROFILEEOF
 
 # ── ロケール / タイムゾーン / ホスト名 ───────────────────────
