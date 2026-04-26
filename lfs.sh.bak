@@ -2577,11 +2577,6 @@ if [ -n "$INETUTILS_TAR" ]; then
 
         if [ -n "$SRCDIR" ]; then
             cd "$SRCDIR"
-            # GCC が Docker コンテナ外でビルドされた場合、AVX 等のホスト固有命令を
-            # コンテナが実行できず SIGILL (Illegal instruction) でクラッシュする。
-            # -march=x86-64 で x86-64 ベースライン命令のみに制限して回避する。
-            export CFLAGS="-O2 -march=x86-64 -mtune=generic"
-            export CXXFLAGS="$CFLAGS"
             ./configure --prefix=/usr --bindir=/usr/bin \
                 --localstatedir=/var \
                 --disable-logger --disable-whois --disable-rcp \
@@ -2589,13 +2584,12 @@ if [ -n "$INETUTILS_TAR" ]; then
                 --disable-servers \
                 --enable-ping --enable-ping6 \
                 > /tmp/firstboot-inetutils-configure.log 2>&1 && \
-            make -j1 \
+            make -j"$(nproc)" \
                 >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
             make install \
                 >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
             echo "[firstboot] inetutils 再ビルド完了" || \
             echo "[firstboot][WARN] 再ビルド失敗。ログ: /tmp/firstboot-inetutils-configure.log"
-            unset CFLAGS CXXFLAGS
 
             # 再ビルド後に権限を設定
             fix_ping /usr/bin/ping
