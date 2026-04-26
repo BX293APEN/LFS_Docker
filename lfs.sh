@@ -2580,7 +2580,7 @@ fix_ping() {
 fix_ping /usr/bin/ping
 fix_ping /usr/bin/ping6
 
-# ── 2. inetutils を /sources から再ビルド(setuid が消えていた場合の完全修正)
+# ── 2. iputils で ping を再ビルド
 SRC=/sources
 
 # printf "${BOLD_GREEN}OK${RESET}\n"
@@ -2590,7 +2590,7 @@ SRC=/sources
 # 現在の ping が正常に動くか確認(lo への ping で判定)
 if ping -c1 -W1 127.0.0.1 &>/dev/null; then
     printf "[firstboot][${BOLD_GREEN}OK${RESET}] ping\n"
-    echo "[firstboot][Skip] inetutils build"
+    echo "[firstboot][Skip] iputils build"
 else
     printf "[firstboot][${BOLD_YELLOW}FAIL${RESET}] ping: iputils で再ビルド\n"
     echo "[firstboot] iputils : rebuilding..."
@@ -2613,7 +2613,7 @@ fi
 echo "[firstboot] sysctl ping_group_range を適用..."
 sysctl -w net.ipv4.ping_group_range="0 2147483647" 2>/dev/null && \
     echo "[firstboot] ping_group_range 設定完了" || \
-    echo "[firstboot][WARN] sysctl 失敗(inetutils-ping は影響なし)"
+    echo "[firstboot][WARN] sysctl 失敗(iputils-ping は影響なし)"
 
 # sysctl.d の設定ファイルも適用(再起動後も有効にするため)
 sysctl -p /etc/sysctl.d/10-network.conf 2>/dev/null || true
