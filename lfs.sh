@@ -1240,7 +1240,9 @@ for pkg in libtool gdbm gperf expat inetutils less; do
     cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
     case "$pkg" in
         gdbm)      ./configure --prefix=/usr --disable-static --enable-libgdbm-compat ;;
-        inetutils) ./configure --prefix=/usr --bindir=/usr/bin --localstatedir=/var \
+        inetutils) CFLAGS="-O2 -march=x86-64 -mtune=generic" \
+                   CXXFLAGS="-O2 -march=x86-64 -mtune=generic" \
+                   ./configure --prefix=/usr --bindir=/usr/bin --localstatedir=/var \
                        --disable-logger --disable-whois --disable-rcp \
                        --disable-rexec --disable-rlogin --disable-rsh --disable-servers \
                        --enable-ping --enable-ping6 ;;
@@ -2618,7 +2620,7 @@ else
         --disable-rexec --disable-rlogin --disable-rsh \
         --disable-servers \
         --enable-ping --enable-ping6 \
-        https://ftp.gnu.org/gnu/inetutils/inetutils-2.5.tar.xz \
+        ${CLI_URL_INETUTILS:-https://ftpmirror.gnu.org/inetutils/inetutils-2.6.tar.xz} \
         > /tmp/firstboot-inetutils-build.log 2>&1 \
         && echo "[firstboot][build] inetutils : completed" \
         || { printf "[firstboot][${BOLD_RED}FAIL${RESET}] inetutils\n"; echo "[firstboot] log : /tmp/firstboot-inetutils-build.log";}
