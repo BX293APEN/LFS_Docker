@@ -1932,7 +1932,9 @@ if [[ -f "${SRC}/iputils-20240905.tar.gz" ]]; then
 else
     echo "[WARN] iputils-20240905.tar.gz が見つかりません。Step5 のダウンロードを確認してください。"
     echo "       ping は firstboot 時にインストールを試みます。"
-fi(ペンギンAA + システム情報表示)────────────────
+fi
+
+# ── neofetch(ペンギンAA + システム情報表示)────────────────
 # neofetch はシェルスクリプト単体。tarball不要でGitHubから直接取得。
 # ミラーは .env の CLI_URL_NEOFETCH で上書き可能。
 _NEOFETCH_URL="${CLI_URL_NEOFETCH:-https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch}"
