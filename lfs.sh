@@ -2605,25 +2605,17 @@ if ping -c1 -W1 127.0.0.1 &>/dev/null; then
     printf "[firstboot][${BOLD_GREEN}OK${RESET}] ping\n"
     echo "[firstboot][Skip] inetutils build"
 else
-    printf "[firstboot][${BOLD_YELLOW}FAIL${RESET}] ping inetutils \n"
-    echo "[firstboot] inetutils : rebuilding..."
-    # /root/.bashrc の build 関数を使って再ビルド
-    # CFLAGS=-march=x86-64: GCC が AVX 等のホスト固有命令を使い SIGILL で
-    # クラッシュするのを防ぐ。JOBS=1: 並列ビルドによる ICE を回避。
+    printf "[firstboot][${BOLD_YELLOW}FAIL${RESET}] ping: iputils で再ビルド\n"
+    echo "[firstboot] iputils : rebuilding..."
     source /root/.bashrc 2>/dev/null
-    build inetutils \
-        "CFLAGS=-O2 -march=x86-64 -mtune=generic" \
-        JOBS=1 \
-        --bindir=/usr/bin \
-        --localstatedir=/var \
-        --disable-logger --disable-whois --disable-rcp \
-        --disable-rexec --disable-rlogin --disable-rsh \
-        --disable-servers \
-        --enable-ping --enable-ping6 \
-        ${CLI_URL_INETUTILS:-https://ftpmirror.gnu.org/inetutils/inetutils-2.6.tar.xz} \
-        > /tmp/firstboot-inetutils-build.log 2>&1 \
-        && echo "[firstboot][build] inetutils : completed" \
-        || { printf "[firstboot][${BOLD_RED}FAIL${RESET}] inetutils\n"; echo "[firstboot] log : /tmp/firstboot-inetutils-build.log";}
+    build iputils \
+        -Dbuildtype=release \
+        -DINSTALL_SYSTEMD_UNITS=false \
+        -DUSE_IDN=false \
+        ${CLI_URL_IPUTILS:-https://github.com/iputils/iputils/archive/refs/tags/20240905.tar.gz} \
+        > /tmp/firstboot-iputils-build.log 2>&1 \
+        && echo "[firstboot][build] iputils : completed" \
+        || { printf "[firstboot][${BOLD_RED}FAIL${RESET}] iputils\n"; echo "[firstboot] log : /tmp/firstboot-iputils-build.log";}
     # 再ビルド後に権限を設定
     fix_ping /usr/bin/ping
     fix_ping /usr/bin/ping6
