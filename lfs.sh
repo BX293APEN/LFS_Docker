@@ -3,7 +3,7 @@
 # lfs.sh  ―  Docker コンテナ内エントリーポイント
 # 役割: LFS base → BLFS CLI ツール群 → tar.gz 出力
 #
-# ターゲット構成: CLI のみ（KDE不要）
+# ターゲット構成: CLI のみ(KDE不要)
 #   sudo / nano / git / curl / wget / htop / tmux /
 #   tree / rsync / unzip / less / vim / bash-completion
 #
@@ -22,14 +22,14 @@ LFS_VERSION="${LFS_VERSION:-12.2}"
 LFS_ARCH="${LFS_ARCH:-x86_64}"
 LFS_TGT="${LFS_TGT:-x86_64-lfs-linux-gnu}"
 
-# ── ミラーリスト（.env のスペース区切り文字列 → bash 配列に変換）────────────
+# ── ミラーリスト(.env のスペース区切り文字列 → bash 配列に変換)────────────
 # .env で未設定の場合のデフォルト値も兼ねる
 read -ra LFS_MIRRORS     <<< "${LFS_MIRRORS:-https://ftp.osuosl.org/pub/lfs/lfs-packages/${LFS_VERSION} https://www.linuxfromscratch.org/lfs/downloads https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/${LFS_VERSION}}"
 read -ra GNU_MIRRORS     <<< "${GNU_MIRRORS:-https://ftpmirror.gnu.org https://ftp.jaist.ac.jp/pub/GNU https://ftp.iij.ad.jp/pub/gnu https://mirrors.kernel.org/gnu https://ftp.gnu.org/gnu}"
 read -ra GCC_INFRA_MIRRORS <<< "${GCC_INFRA_MIRRORS:-https://gcc.gnu.org/pub/gcc/infrastructure}"
 
 # ── wget-list の各URLに対して CLI_URL_<ファイル名> で上書き可能にする辞書 ──
-# キー: ファイル名（basename）, 値: スペース区切りのURLリスト
+# キー: ファイル名(basename), 値: スペース区切りのURLリスト
 # .env の CLI_URL_EXPAT 等が設定されていればそちらを使う
 declare -A PKG_URL_OVERRIDE
 _load_pkg_override() {
@@ -118,7 +118,7 @@ log_skip() { echo "[SKIP] $* (済)"; }
 # smart_wget: ミラーフォールバック + リトライ + 失敗フラグ生成
 #
 # smart_wget <出力ファイル名> <URL> [<URL> ...]
-#   → 指定URLを順番に試す（各URL DL_RETRIES 回リトライ）
+#   → 指定URLを順番に試す(各URL DL_RETRIES 回リトライ)
 #   → 全失敗時: FLAGS/dl_failed_<名前> を生成して return 1
 #
 # smart_wget_lfs <出力ファイル名> <相対パス>
@@ -242,7 +242,7 @@ chown -R lfs:lfs "${LFS}"
 log_info "chown 完了"
 
 # =============================================================================
-# Step 2: LFS ソースダウンロード（ミラーフォールバック付き）
+# Step 2: LFS ソースダウンロード(ミラーフォールバック付き)
 # =============================================================================
 if ! flagged step2_sources; then
     log_step "Step2: LFS ソースダウンロード"
@@ -260,7 +260,7 @@ if ! flagged step2_sources; then
 
     # ── wget-list に記載されたパッケージを smart_wget で1件ずつ取得 ────────────
     # wget --input-file は失敗してもエラーが埋もれるため、1件ずつ管理する
-    log_info "ソースパッケージ ダウンロード中（${DL_RETRIES}回リトライ付き）..."
+    log_info "ソースパッケージ ダウンロード中(${DL_RETRIES}回リトライ付き)..."
     dl_fail_count=0
     while IFS= read -r pkg_url || [[ -n "${pkg_url}" ]]; do
         [[ -z "${pkg_url}" || "${pkg_url}" =~ ^# ]] && continue
@@ -284,11 +284,11 @@ if ! flagged step2_sources; then
             smart_wget "${pkg_file}" "${pkg_url}" || (( dl_fail_count++ )) || true
         fi
     done < wget-list
-    log_info "一括ダウンロード完了（失敗: ${dl_fail_count} 件）"
+    log_info "一括ダウンロード完了(失敗: ${dl_fail_count} 件)"
 
-    # ── GCC 依存ライブラリ（mpfr / gmp / mpc）の確実な取得 ──────────────────
+    # ── GCC 依存ライブラリ(mpfr / gmp / mpc)の確実な取得 ──────────────────
     # wget-list の URL が ftp.gnu.org 直接指定で失敗する場合に GNU_MIRRORS で補完
-    log_info "GCC 依存ライブラリ（mpfr/gmp/mpc）確認・補完..."
+    log_info "GCC 依存ライブラリ(mpfr/gmp/mpc)確認・補完..."
     # 書式: "ファイル名 gnuサブディレクトリ"
     GCC_DEPS=(
         "mpfr-4.2.1.tar.xz mpfr"
@@ -301,21 +301,21 @@ if ! flagged step2_sources; then
         smart_wget_gnu "${dep_file}" "${dep_sub}" || true
     done
 
-    # ── expat フォールバック（wget-list に無いバージョンの場合）──────────────
+    # ── expat フォールバック(wget-list に無いバージョンの場合)──────────────
     if [[ ! -s "expat-2.6.2.tar.xz" ]]; then
         log_info "expat-2.6.2.tar.xz を取得中..."
         read -ra _URL_EXPAT_S2 <<< "${CLI_URL_EXPAT:-https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.xz}"
         smart_wget "expat-2.6.2.tar.xz" "${_URL_EXPAT_S2[@]}" || true
     fi
 
-    # ── libpipeline フォールバック（man-db の必須依存ライブラリ）────────────
+    # ── libpipeline フォールバック(man-db の必須依存ライブラリ)────────────
     if [[ ! -s "libpipeline-1.5.0.tar.gz" ]]; then
         log_info "libpipeline-1.5.0.tar.gz を取得中..."
         read -ra _URL_LIBPIPELINE_S2 <<< "${CLI_URL_LIBPIPELINE:-https://download.savannah.gnu.org/releases/libpipeline/libpipeline-1.5.0.tar.gz https://www.linuxfromscratch.org/lfs/downloads/12.2/libpipeline-1.5.0.tar.gz}"
         smart_wget "libpipeline-1.5.0.tar.gz" "${_URL_LIBPIPELINE_S2[@]}" || true
     fi
 
-    # ── groff フォールバック（man-db の soelim/tbl 依存）────────────────────
+    # ── groff フォールバック(man-db の soelim/tbl 依存)────────────────────
     if [[ ! -s "groff-1.23.0.tar.gz" ]]; then
         log_info "groff-1.23.0.tar.gz を取得中..."
         read -ra _URL_GROFF_S2 <<< "${CLI_URL_GROFF:-https://ftp.gnu.org/gnu/groff/groff-1.23.0.tar.gz https://mirrors.kernel.org/gnu/groff/groff-1.23.0.tar.gz https://ftpmirror.gnu.org/groff/groff-1.23.0.tar.gz}"
@@ -356,7 +356,7 @@ if ! flagged step2_sources; then
         if [[ -z "${BAD}" ]]; then
             log_info "MD5 OK: 全ファイル正常"
         else
-            echo "[WARN] MD5 不一致（破損の可能性あり）:"
+            echo "[WARN] MD5 不一致(破損の可能性あり):"
             echo "${BAD}"
         fi
     fi
@@ -470,8 +470,8 @@ do_linux_headers() {
 }
 
 do_glibc() {
-    # lib64 はディレクトリとして存在している必要がある（Step1 で作成済み）
-    # その中に ld-linux の symlink を作成する（ディレクトリ自体をリンクにしない）
+    # lib64 はディレクトリとして存在している必要がある(Step1 で作成済み)
+    # その中に ld-linux の symlink を作成する(ディレクトリ自体をリンクにしない)
     mkdir -p "${LFS}/lib64"
     ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-linux-x86-64.so.2"
     ln -sfnv ../usr/lib/ld-linux-x86-64.so.2 "${LFS}/lib64/ld-lsb-x86-64.so.3"
@@ -1248,7 +1248,7 @@ for pkg in libtool gdbm gperf expat inetutils less; do
         *)         ./configure --prefix=/usr ;;
     esac
     make && make install
-    # ping は setuid root が必要（SOCK_RAW 権限）
+    # ping は setuid root が必要(SOCK_RAW 権限)
     if [[ "$pkg" == "inetutils" ]]; then
         chmod -v 4755 /usr/bin/ping  2>/dev/null || true
         chmod -v 4755 /usr/bin/ping6 2>/dev/null || true
@@ -1468,7 +1468,7 @@ do_libpipeline() {
 }
 build "Libpipeline" "$(ls ${SRC}/libpipeline-*.tar.* 2>/dev/null | head -1)" do_libpipeline
 
-# ── Groff（man-db の soelim / tbl 依存）─────────────────────────────────────
+# ── Groff(man-db の soelim / tbl 依存)─────────────────────────────────────
 do_groff() {
     PAGE=A4 ./configure --prefix=/usr
     make && make install
@@ -1533,14 +1533,14 @@ else
 fi
 
 # =============================================================================
-# Step 5: CLI ツール追加ダウンロード（KDE不要・軽量構成）
+# Step 5: CLI ツール追加ダウンロード(KDE不要・軽量構成)
 # =============================================================================
 if ! flagged step5_cli_sources; then
     log_step "Step5: CLI ツール追加ダウンロード"
     mkdir -p "${LFS}/sources"
     cd "${LFS}/sources"
 
-    # ── CLI パッケージURL定義（.env の CLI_URL_* で上書き可能）──────────────
+    # ── CLI パッケージURL定義(.env の CLI_URL_* で上書き可能)──────────────
     # 各変数はスペース区切りで複数URL指定可。左から順に試してフォールバックします。
     read -ra _URL_SUDO          <<< "${CLI_URL_SUDO:-https://www.sudo.ws/dist/sudo-1.9.15p5.tar.gz}"
     read -ra _URL_NANO          <<< "${CLI_URL_NANO:-https://www.nano-editor.org/dist/v8/nano-8.3.tar.xz}"
@@ -1600,12 +1600,12 @@ if ! flagged step5_cli_sources; then
     _cli_pkg "libpng-1.6.44.tar.xz"                    "${_URL_LIBPNG[@]}"
     _cli_pkg "freetype-2.13.3.tar.xz"                  "${_URL_FREETYPE[@]}"
     _cli_pkg "unifont-15.1.04.bdf.gz"                  "${_URL_UNIFONT[@]}"
-    # kbd: 日本語キーボード配列（loadkeys jp106）に必要
-    # ミラーは .env の CLI_URL_KBD で上書き可能（スペース区切りで複数指定）
+    # kbd: 日本語キーボード配列(loadkeys jp106)に必要
+    # ミラーは .env の CLI_URL_KBD で上書き可能(スペース区切りで複数指定)
     read -ra _URL_KBD <<< "${CLI_URL_KBD:-https://www.kernel.org/pub/linux/utils/kbd/kbd-2.6.4.tar.xz https://mirrors.edge.kernel.org/pub/linux/utils/kbd/kbd-2.6.4.tar.xz}"
     _cli_pkg "kbd-2.6.4.tar.xz" "${_URL_KBD[@]}"
     # which: Step4のwget-listに含まれない場合の補完
-    # ミラーは .env の CLI_URL_WHICH で上書き可能（スペース区切りで複数指定）
+    # ミラーは .env の CLI_URL_WHICH で上書き可能(スペース区切りで複数指定)
     if [[ ! -s "which-2.21.tar.gz" ]]; then
         read -ra _URL_WHICH <<< "${CLI_URL_WHICH:-https://ftp.gnu.org/gnu/which/which-2.21.tar.gz https://ftpmirror.gnu.org/which/which-2.21.tar.gz}"
         _cli_pkg "which-2.21.tar.gz" "${_URL_WHICH[@]}"
@@ -1660,7 +1660,7 @@ build() {
 do_dbus() {
     # LFS公式 (r13.0-systemd) の手順に準拠
     # --wrap-mode=nofallback: テスト用Glibの自動ダウンロードを防ぐ
-    # runstatedir等の細かいオプションは不要（デフォルト値が正しい）
+    # runstatedir等の細かいオプションは不要(デフォルト値が正しい)
     mkdir -p build && cd build
     meson setup --prefix=/usr \
         --buildtype=release \
@@ -1821,15 +1821,15 @@ do_dhcpcd() {
 # 全てのイーサネットNICを対象にする
 allowinterfaces eth* enp* ens* eno* em* *
 background
-# タイムアウト設定（リンクが遅いNICへの対策）
+# タイムアウト設定(リンクが遅いNICへの対策)
 timeout 30
-# ホスト名を送信しない（プライバシー）
+# ホスト名を送信しない(プライバシー)
 hostname
 # 必要な場合はコメントアウトを外す
 # static domain_name_servers=8.8.8.8 8.8.4.4
 DHCPCFGEOF
 
-    # ── 起動スクリプト（rc3.d に登録）──────────────────────
+    # ── 起動スクリプト(rc3.d に登録)──────────────────────
     mkdir -p /etc/rc.d/init.d /etc/rc.d/rc3.d
     cat > /etc/rc.d/init.d/dhcpcd << 'DHCPEOF'
 #!/bin/bash
@@ -1843,7 +1843,7 @@ case $1 in
         ip link set "$name" up 2>/dev/null && \
             echo "  リンクアップ: $name" || true
     done
-    # dhcpcd をバックグラウンドで起動（全NICに対して）
+    # dhcpcd をバックグラウンドで起動(全NICに対して)
     dhcpcd -q -b 2>/dev/null || dhcpcd -q -b --allowinterfaces '*'
     ;;
   stop)
@@ -1856,7 +1856,7 @@ esac
 DHCPEOF
     chmod +x /etc/rc.d/init.d/dhcpcd
 
-    # ── rc3.d へシンボリックリンク（これが無いとランレベル3で起動しない）──
+    # ── rc3.d へシンボリックリンク(これが無いとランレベル3で起動しない)──
     ln -sf ../init.d/dhcpcd /etc/rc.d/rc3.d/S30dhcpcd
 }
 build "dhcpcd" "dhcpcd-10.0.10.tar.xz" do_dhcpcd
@@ -1877,7 +1877,7 @@ do_openssh() {
 }
 build "OpenSSH" "openssh-9.9p1.tar.gz" do_openssh
 
-# ── kbd（日本語キーボード配列・loadkeys に必要）─────────────
+# ── kbd(日本語キーボード配列・loadkeys に必要)─────────────
 do_kbd() {
     ./configure --prefix=/usr --disable-vlock
     make && make install
@@ -1900,7 +1900,7 @@ do_wget() {
 }
 build "wget" "wget-1.25.0.tar.gz" do_wget
 
-# ── neofetch（ペンギンAA + システム情報表示）────────────────
+# ── neofetch(ペンギンAA + システム情報表示)────────────────
 # neofetch はシェルスクリプト単体。tarball不要でGitHubから直接取得。
 # ミラーは .env の CLI_URL_NEOFETCH で上書き可能。
 _NEOFETCH_URL="${CLI_URL_NEOFETCH:-https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch}"
@@ -1948,7 +1948,7 @@ pad() {
   printf '%b%*s' "$str" "$pad_n" ""
 }
 
-ART_W=50  # アスキーアート列の表示幅（実際の最長行に合わせて調整）
+ART_W=50  # アスキーアート列の表示幅(実際の最長行に合わせて調整)
 
 pad "${B}              .:@:.${R}"                                                       $ART_W; printf "                         \n"
 pad "${B}            :@@@@@@@:${R}"                                                     $ART_W; printf "                       \n"
@@ -2013,37 +2013,37 @@ build "GRUB" "grub-2.12.tar.xz" do_grub
 # morning.sh の grub-install / grub-mkconfig がこれらを必要とする
 mkdir -p /boot/efi /boot/grub/fonts
 
-# ── udev rules: NIC が追加されたら自動リンクアップ（課題3）───
+# ── udev rules: NIC が追加されたら自動リンクアップ(課題3)───
 # udev が NET_ID サブシステムのイベントを拾い ip link set up する
 mkdir -p /etc/udev/rules.d
 cat > /etc/udev/rules.d/10-network-link-up.rules << 'UDEVEOF'
 # 全てのイーサネットインターフェースをリンクアップする
 # SUBSYSTEM=="net": NIC イベント
-# ACTION=="add":   NIC が追加（起動時 or ホットプラグ）
+# ACTION=="add":   NIC が追加(起動時 or ホットプラグ)
 # KERNEL!="lo":    ループバックは除外
 SUBSYSTEM=="net", ACTION=="add", KERNEL!="lo", RUN+="/sbin/ip link set %k up"
 UDEVEOF
 
-# ── /etc/sysctl.conf: ping の権限設定（課題1）──────────────
+# ── /etc/sysctl.conf: ping の権限設定(課題1)──────────────
 # net.ipv4.ping_group_range でルート以外のユーザーも ping を使えるようにする
 # 値: "0 2147483647" = 全グループを許可
 mkdir -p /etc/sysctl.d
 cat > /etc/sysctl.d/10-network.conf << 'SYSCTLEOF'
-# ping を全ユーザーに許可（ICMP ソケット）
+# ping を全ユーザーに許可(ICMP ソケット)
 net.ipv4.ping_group_range = 0 2147483647
-# IPv4 フォワーディング（不要なら 0 のまま）
+# IPv4 フォワーディング(不要なら 0 のまま)
 net.ipv4.ip_forward = 0
 # TCP/IP チューニング
 net.core.rmem_default = 262144
 net.core.wmem_default = 262144
 SYSCTLEOF
 
-# rcS から sysctl を適用するよう後で追記（rcS は後のブロックで生成）
+# rcS から sysctl を適用するよう後で追記(rcS は後のブロックで生成)
 
 # ── unicode.pf2 生成はスキップ ───────────────────────────────
 # gfxterm/unifont は文字化けの原因となるため使用しない。
 # GRUBメニューは ASCII コンソールモード (terminal_output console) で表示する。
-echo "[CLI] GRUBフォント生成をスキップ（コンソールモードを使用）"
+echo "[CLI] GRUBフォント生成をスキップ(コンソールモードを使用)"
 
 # ── Linux カーネル ────────────────────────────────────────────
 do_kernel() {
@@ -2055,7 +2055,7 @@ do_kernel() {
     scripts/config --enable CONFIG_EFI_STUB
     scripts/config --enable CONFIG_EFI_PARTITION
 
-    # ── /dev 自動生成（必須）──────────────────────
+    # ── /dev 自動生成(必須)──────────────────────
     scripts/config --enable CONFIG_DEVTMPFS
     scripts/config --enable CONFIG_DEVTMPFS_MOUNT
 
@@ -2072,18 +2072,18 @@ do_kernel() {
     scripts/config --enable CONFIG_DRM_SIMPLEDRM
     scripts/config --enable CONFIG_FONT_8x16
 
-    # ── SCSI サブシステム（USB Storage の依存元）─
+    # ── SCSI サブシステム(USB Storage の依存元)─
     # USB Storage → SCSI → BLK_DEV_SD の順で依存しているため
-    # 全て =y（組み込み）にしないとinitramfsなしでは起動できない
+    # 全て =y(組み込み)にしないとinitramfsなしでは起動できない
     scripts/config --enable CONFIG_SCSI
     scripts/config --enable CONFIG_SCSI_MOD
     scripts/config --enable CONFIG_BLK_DEV_SD
 
-    # ── USB コントローラ（全世代カバー）────────────
+    # ── USB コントローラ(全世代カバー)────────────
     scripts/config --enable CONFIG_USB_SUPPORT
     scripts/config --enable CONFIG_USB_XHCI_HCD   # USB 3.x
     scripts/config --enable CONFIG_USB_EHCI_HCD   # USB 2.0
-    scripts/config --enable CONFIG_USB_OHCI_HCD   # USB 1.1（古いPC・一部UEFI）
+    scripts/config --enable CONFIG_USB_OHCI_HCD   # USB 1.1(古いPC・一部UEFI)
 
     # ── USB Mass Storage ────────────────────────────
     scripts/config --enable CONFIG_USB_STORAGE
@@ -2107,20 +2107,20 @@ do_kernel() {
     scripts/config --enable CONFIG_NLS_ISO8859_1
     scripts/config --enable CONFIG_NLS_UTF8
 
-    # ── ネットワーク基盤（ping・ICMP・TCP/IP スタック）──────
+    # ── ネットワーク基盤(ping・ICMP・TCP/IP スタック)──────
     # CONFIG_INET が無いと ping が "Network unreachable" / "Operation not permitted"
     scripts/config --enable CONFIG_NET
-    scripts/config --enable CONFIG_INET            # IPv4 + ICMP スタック（ping に必須）
+    scripts/config --enable CONFIG_INET            # IPv4 + ICMP スタック(ping に必須)
     scripts/config --enable CONFIG_IP_MULTICAST
-    scripts/config --enable CONFIG_IPV6            # IPv6（任意だが一般的）
-    scripts/config --enable CONFIG_UNIX            # UNIXドメインソケット（dhcpcd等が使用）
-    scripts/config --enable CONFIG_PACKET          # raw socket（ping の SOCK_RAW に必要）
+    scripts/config --enable CONFIG_IPV6            # IPv6(任意だが一般的)
+    scripts/config --enable CONFIG_UNIX            # UNIXドメインソケット(dhcpcd等が使用)
+    scripts/config --enable CONFIG_PACKET          # raw socket(ping の SOCK_RAW に必要)
     scripts/config --enable CONFIG_NET_CORE
 
     # ── イーサネットドライバ ────────────────────────
     # 必要なドライバをコメントアウトで用意。使用するNICに合わせて
     # 該当行のコメントを外して有効化してください。
-    # （有効化後は make olddefconfig → make -j... を再実行すること）
+    # (有効化後は make olddefconfig → make -j... を再実行すること)
     #
     # 汎用・準仮想化
     #scripts/config --enable CONFIG_VIRTIO_NET          # QEMU/KVM virtio-net
@@ -2148,8 +2148,8 @@ do_kernel() {
     #scripts/config --enable CONFIG_ATL2                # Attansic/Qualcomm Atheros L2
     #scripts/config --enable CONFIG_ATSE1G              # Qualcomm Atheros AR8131/AR8151 GbE
 
-    # ★ 依存関係を自動解決（これがないと上記の --enable が
-    #    依存先未解決のまま無効化される。scripts/config の後は必須）
+    # ★ 依存関係を自動解決(これがないと上記の --enable が
+    #    依存先未解決のまま無効化される。scripts/config の後は必須)
     make olddefconfig
 
     # ビルド後に重要ドライバが本当に =y になっているか検証
@@ -2160,7 +2160,7 @@ do_kernel() {
                CONFIG_NET CONFIG_INET CONFIG_PACKET; do
         val=$(grep "^${cfg}=" .config || echo "${cfg}=MISSING")
         echo "  ${val}"
-        # =m（モジュール）のままだとinitramfsなしでは起動不可なので警告
+        # =m(モジュール)のままだとinitramfsなしでは起動不可なので警告
         if [[ "${val}" == *"=m" ]]; then
             echo "  [WARN] ${cfg} がモジュールのままです。依存関係を確認してください。"
         fi
@@ -2176,7 +2176,7 @@ KERNEL_TAR=$(ls ${SRC}/linux-*.tar.* 2>/dev/null | head -1)
 if [[ -f "$KERNEL_TAR" ]]; then
     build "Linux Kernel" "$(basename $KERNEL_TAR)" do_kernel
 else
-    echo "[WARN] Linux カーネルソースが見つかりません（Step2 で取得済みのはずです）"
+    echo "[WARN] Linux カーネルソースが見つかりません(Step2 で取得済みのはずです)"
 fi
 
 # ── /etc/profile (環境変数) ───────────────────────────────────
@@ -2211,6 +2211,20 @@ cat > /root/.bashrc << 'RCEOF'
 
 PS1='\[\e[01;32m\]\u@\h\[\e[0m\]:\[\e[01;34m\]\w\[\e[0m\]\$ '
 
+# --- Colors ---
+BOLD_GREEN='\033[1;32m'
+BOLD_RED='\033[1;31m'
+BOLD_YELLOW='\033[1;33m'
+RESET='\033[0m'
+
+# --- Usage ---
+# echo -e "${BOLD_GREEN}OK${RESET}"
+# echo -e "${BOLD_RED}FAIL${RESET}"
+# echo -e "${BOLD_YELLOW}WARN${RESET}"
+# printf "${BOLD_GREEN}OK${RESET}\n"
+# printf "${BOLD_RED}FAIL${RESET}\n"
+# printf "${BOLD_YELLOW}WARN${RESET}\n"
+
 alias la='ls -lhA --color=auto'
 alias ..='cd ..'
 alias ...='cd ../..'
@@ -2226,7 +2240,7 @@ alias addcmd='nano /root/.bashrc'
 #   build nano --enable-utf8 https://example.com/nano-8.3.tar.xz
 #
 # 動作:
-#   1. /sources/<pkg>*.tar.* を探してそのまま展開（既存）
+#   1. /sources/<pkg>*.tar.* を探してそのまま展開(既存)
 #   2. 見つからない場合、ミラーURL 引数があればそこから wget で取得
 #   3. configure フラグを付けて ./configure → make → make install
 build() {
@@ -2336,7 +2350,7 @@ build() {
 #
 # 動作:
 #   1. ミラーURLがあれば新 tarball を /sources に wget
-#   2. 古い tarball（同名パッケージの旧バージョン）を削除
+#   2. 古い tarball(同名パッケージの旧バージョン)を削除
 #   3. build 関数で再ビルド・再インストール
 update() {
     local pkg="$1"; shift
@@ -2393,9 +2407,9 @@ LANG=__LOCALE_NAME__
 LC_ALL=__LOCALE_NAME__
 LOCEOF
 
-# ── コンソールフォント / キーマップ設定（文字化け対策）────────
+# ── コンソールフォント / キーマップ設定(文字化け対策)────────
 # Linuxコンソールは標準でLatin系フォントのため日本語が文字化けする。
-# kbd の ter-v4b（Terminus 16px）は ASCII + 拡張Latin に対応し安定。
+# kbd の ter-v4b(Terminus 16px)は ASCII + 拡張Latin に対応し安定。
 # 日本語表示はコンソールの限界のため、LANGはUTF-8を維持しつつ
 # フォントを正しく設定することで記号・ASCII部分の化けを防ぐ。
 cat > /etc/vconsole.conf << 'VCEOF'
@@ -2432,7 +2446,7 @@ l3:3:wait:/etc/rc.d/rc 3
 # ランレベル6: reboot
 l6:6:wait:/etc/rc.d/rc 6
 
-# コンソール getty（tty1はrootで自動ログイン）
+# コンソール getty(tty1はrootで自動ログイン)
 c1:2345:respawn:/sbin/agetty --autologin root tty1 38400
 c2:2345:respawn:/sbin/agetty tty2 38400
 c3:2345:respawn:/sbin/agetty tty3 38400
@@ -2456,12 +2470,12 @@ hostname $(cat /etc/hostname 2>/dev/null || echo lfs)
 mount -o remount,rw / 2>/dev/null || true
 mkdir -p /var/log /var/run /var/lock
 touch /var/log/wtmp /var/log/btmp /var/run/utmp 2>/dev/null || true
-# 日本語キーボード＋コンソールフォント設定（文字化け対策）
+# 日本語キーボード＋コンソールフォント設定(文字化け対策)
 [ -f /etc/vconsole.conf ] && source /etc/vconsole.conf
 [ -n "${KEYMAP}" ] && loadkeys ${KEYMAP} 2>/dev/null || true
 [ -n "${FONT}" ]   && setfont ${FONT}   2>/dev/null || true
 
-# ── 全NICのリンクアップ（課題3: 自動リンクアップ）──────────
+# ── 全NICのリンクアップ(課題3: 自動リンクアップ)──────────
 # udev が起動した後、全ての物理NICを一斉に up にする
 echo "ネットワークインターフェースを初期化中..."
 for iface in /sys/class/net/*/; do
@@ -2477,7 +2491,7 @@ done
 # ループバックは必ず up
 ip link set lo up 2>/dev/null || true
 
-# sysctl 設定を適用（ping 権限等）
+# sysctl 設定を適用(ping 権限等)
 sysctl -p /etc/sysctl.d/10-network.conf 2>/dev/null || true
 
 echo "システム初期化完了"
@@ -2557,7 +2571,7 @@ fix_ping() {
     local bin="$1"
     [ -x "$bin" ] || return 0
 
-    # CAP_NET_RAW が使えれば setuid 不要（overlayfs でも消えない）
+    # CAP_NET_RAW が使えれば setuid 不要(overlayfs でも消えない)
     if command -v setcap &>/dev/null; then
         setcap cap_net_raw+ep "$bin" 2>/dev/null && {
             echo "[firstboot] setcap cap_net_raw+ep: $bin"
@@ -2573,43 +2587,40 @@ fix_ping() {
 fix_ping /usr/bin/ping
 fix_ping /usr/bin/ping6
 
-# ── 2. inetutils を /sources から再ビルド（setuid が消えていた場合の完全修正）
+# ── 2. inetutils を /sources から再ビルド(setuid が消えていた場合の完全修正)
 SRC=/sources
-INETUTILS_TAR=$(ls "${SRC}"/inetutils-*.tar.* 2>/dev/null | head -1)
 
-if [ -n "$INETUTILS_TAR" ]; then
-    echo "[firstboot] inetutils tarball 発見: ${INETUTILS_TAR##*/}"
+# printf "${BOLD_GREEN}OK${RESET}\n"
+# printf "${BOLD_RED}FAIL${RESET}\n"
+# printf "${BOLD_YELLOW}WARN${RESET}\n"
 
-    # 現在の ping が正常に動くか確認（lo への ping で判定）
-    if ping -c1 -W1 127.0.0.1 &>/dev/null; then
-        echo "[firstboot] ping 動作確認 OK。再ビルドをスキップします。"
-    else
-        echo "[firstboot] ping が動かないため inetutils を再ビルドします..."
-
-        # /root/.bashrc の build 関数を使って再ビルド
-        # CFLAGS=-march=x86-64: GCC が AVX 等のホスト固有命令を使い SIGILL で
-        # クラッシュするのを防ぐ。JOBS=1: 並列ビルドによる ICE を回避。
-        source /root/.bashrc 2>/dev/null
-        build inetutils \
-            "CFLAGS=-O2 -march=x86-64 -mtune=generic" \
-            JOBS=1 \
-            --bindir=/usr/bin \
-            --localstatedir=/var \
-            --disable-logger --disable-whois --disable-rcp \
-            --disable-rexec --disable-rlogin --disable-rsh \
-            --disable-servers \
-            --enable-ping --enable-ping6 \
-            https://ftp.gnu.org/gnu/inetutils/inetutils-2.5.tar.xz \
-            > /tmp/firstboot-inetutils-build.log 2>&1 \
-            && echo "[firstboot] inetutils 再ビルド完了" \
-            || echo "[firstboot][WARN] 再ビルド失敗。ログ: /tmp/firstboot-inetutils-build.log"
-
-        # 再ビルド後に権限を設定
-        fix_ping /usr/bin/ping
-        fix_ping /usr/bin/ping6
-    fi
+# 現在の ping が正常に動くか確認(lo への ping で判定)
+if ping -c1 -W1 127.0.0.1 &>/dev/null; then
+    printf "[firstboot][${BOLD_GREEN}OK${RESET}] ping\n"
+    echo "[firstboot][Skip] inetutils build"
 else
-    echo "[firstboot] inetutils tarball なし（/sources）。権限設定のみで続行。"
+    printf "[firstboot][${BOLD_YELLOW}FAIL${RESET}] ping inetutils \n"
+    echo "[firstboot] inetutils : rebuilding..."
+    # /root/.bashrc の build 関数を使って再ビルド
+    # CFLAGS=-march=x86-64: GCC が AVX 等のホスト固有命令を使い SIGILL で
+    # クラッシュするのを防ぐ。JOBS=1: 並列ビルドによる ICE を回避。
+    source /root/.bashrc 2>/dev/null
+    build inetutils \
+        "CFLAGS=-O2 -march=x86-64 -mtune=generic" \
+        JOBS=1 \
+        --bindir=/usr/bin \
+        --localstatedir=/var \
+        --disable-logger --disable-whois --disable-rcp \
+        --disable-rexec --disable-rlogin --disable-rsh \
+        --disable-servers \
+        --enable-ping --enable-ping6 \
+        https://ftp.gnu.org/gnu/inetutils/inetutils-2.5.tar.xz \
+        > /tmp/firstboot-inetutils-build.log 2>&1 \
+        && echo "[firstboot][build] inetutils : completed" \
+        || { printf "[firstboot][${BOLD_RED}FAIL${RESET}] inetutils\n"; echo "[firstboot] log : /tmp/firstboot-inetutils-build.log";}
+    # 再ビルド後に権限を設定
+    fix_ping /usr/bin/ping
+    fix_ping /usr/bin/ping6
 fi
 
 # ── 3. sysctl: ping_group_range を確実に適用 ─────────────────
@@ -2617,17 +2628,17 @@ fi
 echo "[firstboot] sysctl ping_group_range を適用..."
 sysctl -w net.ipv4.ping_group_range="0 2147483647" 2>/dev/null && \
     echo "[firstboot] ping_group_range 設定完了" || \
-    echo "[firstboot][WARN] sysctl 失敗（inetutils-ping は影響なし）"
+    echo "[firstboot][WARN] sysctl 失敗(inetutils-ping は影響なし)"
 
-# sysctl.d の設定ファイルも適用（再起動後も有効にするため）
+# sysctl.d の設定ファイルも適用(再起動後も有効にするため)
 sysctl -p /etc/sysctl.d/10-network.conf 2>/dev/null || true
 
 # ── 4. 動作確認 ──────────────────────────────────────────────
-echo "[firstboot] ping 動作確認中..."
+echo "[firstboot][RUN] ping"
 if ping -c1 -W2 127.0.0.1 &>/dev/null; then
     echo "[firstboot] ping 127.0.0.1 → OK"
 else
-    echo "[firstboot][WARN] ping 127.0.0.1 が失敗。カーネル CONFIG_INET を確認してください。"
+    echo "[firstboot][FAIL] ping 127.0.0.1"
 fi
 
 # ── 完了フラグ ────────────────────────────────────────────────
