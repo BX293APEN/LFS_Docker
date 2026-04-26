@@ -2589,7 +2589,7 @@ if [ -n "$INETUTILS_TAR" ]; then
                 --disable-servers \
                 --enable-ping --enable-ping6 \
                 > /tmp/firstboot-inetutils-configure.log 2>&1 && \
-            make -j1 \
+            make -j"$(nproc)" \
                 >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
             make install \
                 >> /tmp/firstboot-inetutils-configure.log 2>&1 && \
