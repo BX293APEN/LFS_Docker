@@ -1232,30 +1232,17 @@ do_bash() {
 build "Bash" "$(ls ${SRC}/bash-*.tar.* 2>/dev/null | head -1)" do_bash
 
 # ── Libtool / GDBM / Gperf / Expat / Inetutils / Less ──────
-for pkg in libtool gdbm gperf expat inetutils less; do
+for pkg in libtool gdbm gperf expat less; do
     f=$(ls ${SRC}/${pkg}-*.tar.* 2>/dev/null | head -1 || true)
     [[ -f "$f" ]] || { echo "[SKIP] ${pkg}: tarball なし"; continue; }
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 開始"
     dir=$(tar -tf "$f" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     cd ${SRC} && rm -rf "$dir" && tar -xf "$f" && cd "$dir"
     case "$pkg" in
-        gdbm)      ./configure --prefix=/usr --disable-static --enable-libgdbm-compat ;;
-        inetutils) CFLAGS="-O2 -march=x86-64 -mtune=generic" \
-                   CXXFLAGS="-O2 -march=x86-64 -mtune=generic" \
-                   ./configure --prefix=/usr --bindir=/usr/bin --localstatedir=/var \
-                       --disable-logger --disable-whois --disable-rcp \
-                       --disable-rexec --disable-rlogin --disable-rsh --disable-servers \
-                       --enable-ping --enable-ping6 ;;
-
-        *)         ./configure --prefix=/usr ;;
+        gdbm) ./configure --prefix=/usr --disable-static --enable-libgdbm-compat ;;
+        *)    ./configure --prefix=/usr ;;
     esac
     make && make install
-    # ping は setuid root が必要(SOCK_RAW 権限)
-    if [[ "$pkg" == "inetutils" ]]; then
-        chmod -v 4755 /usr/bin/ping  2>/dev/null || true
-        chmod -v 4755 /usr/bin/ping6 2>/dev/null || true
-        echo "[BASE] ping setuid 設定完了"
-    fi
     cd ${SRC} && rm -rf "$dir"
     echo "[BASE] $(date '+%H:%M:%S') ${pkg} 完了"
 done
