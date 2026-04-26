@@ -66,6 +66,7 @@ _load_pkg_override "unifont-15.1.04.bdf.gz"       "CLI_URL_UNIFONT"
 _load_pkg_override "kbd-2.6.4.tar.xz"             "CLI_URL_KBD"
 _load_pkg_override "which-2.21.tar.gz"             "CLI_URL_WHICH"
 _load_pkg_override "wget-1.25.0.tar.gz"            "CLI_URL_WGET"
+_load_pkg_override "iputils-20240905.tar.gz"       "CLI_URL_IPUTILS"
 
 DL_RETRIES="${DL_RETRIES:-3}"
 DL_TIMEOUT="${DL_TIMEOUT:-90}"
@@ -1607,6 +1608,12 @@ if ! flagged step5_cli_sources; then
     read -ra _URL_WGET <<< "${CLI_URL_WGET:-https://ftpmirror.gnu.org/wget/wget-1.25.0.tar.gz https://ftp.gnu.org/gnu/wget/wget-1.25.0.tar.gz}"
     _cli_pkg "wget-1.25.0.tar.gz" "${_URL_WGET[@]}"
 
+    # iputils: ping コマンド提供(Step6 の chroot 内でビルド)
+    # releases/download 形式を優先。archive/refs/tags はディレクトリ構造が不安定なため
+    # フォールバックとしてのみ使用。CLI_URL_IPUTILS で上書き可能(スペース区切り複数指定可)
+    read -ra _URL_IPUTILS <<< "${CLI_URL_IPUTILS:-https://github.com/iputils/iputils/releases/download/20240905/iputils-20240905.tar.gz https://github.com/iputils/iputils/archive/refs/tags/20240905.tar.gz}"
+    _cli_pkg "iputils-20240905.tar.gz" "${_URL_IPUTILS[@]}"
+
     done_flag step5_cli_sources
     log_info "Step5 完了"
 else
@@ -1889,7 +1896,43 @@ do_wget() {
 }
 build "wget" "wget-1.25.0.tar.gz" do_wget
 
-# ── neofetch(ペンギンAA + システム情報表示)────────────────
+# ── iputils (ping / ping6 / arping / clockdiff) ────────────────
+# LFS base には ping が含まれないため iputils でビルドする。
+# meson ビルドで IDN / systemd 依存を無効化してスリムに構成。
+do_iputils() {
+    mkdir -p build && cd build
+    meson setup ..                              \
+        --prefix=/usr                           \
+        --buildtype=release                     \
+        -D BUILD_PING=true                      \
+        -D BUILD_ARPING=true                    \
+        -D BUILD_CLOCKDIFF=true                 \
+        -D BUILD_TRACEPATH=false                \
+        -D USE_IDN=false                        \
+        -D USE_GETTEXT=false                    \
+        -D INSTALL_SYSTEMD_UNITS=false          \
+        -D INSTALL_SYSVINIT_UNITS=false         \
+        -D NINFOD=false
+    ninja && ninja install
+
+    # setuid ビットは tar.gz 展開後に消える場合がある(overlayfs の制限)
+    # CAP_NET_RAW を優先、失敗したら setuid にフォールバック
+    if command -v setcap &>/dev/null; then
+        setcap cap_net_raw+ep /usr/bin/ping  2>/dev/null || chmod 4755 /usr/bin/ping
+        setcap cap_net_raw+ep /usr/bin/ping6 2>/dev/null || chmod 4755 /usr/bin/ping6 2>/dev/null || true
+    else
+        chmod 4755 /usr/bin/ping
+        chmod 4755 /usr/bin/ping6 2>/dev/null || true
+    fi
+    echo "[CLI] iputils インストール完了: $(ping --version 2>&1 | head -1)"
+}
+# 取得に失敗している場合はスキップ(firstboot でのリトライ案内が出る)
+if [[ -f "${SRC}/iputils-20240905.tar.gz" ]]; then
+    build "iputils" "iputils-20240905.tar.gz" do_iputils
+else
+    echo "[WARN] iputils-20240905.tar.gz が見つかりません。Step5 のダウンロードを確認してください。"
+    echo "       ping は firstboot 時にインストールを試みます。"
+fi(ペンギンAA + システム情報表示)────────────────
 # neofetch はシェルスクリプト単体。tarball不要でGitHubから直接取得。
 # ミラーは .env の CLI_URL_NEOFETCH で上書き可能。
 _NEOFETCH_URL="${CLI_URL_NEOFETCH:-https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch}"
@@ -2537,7 +2580,7 @@ echo ""
 echo "[CLI] ===== CLI ビルド完了！ ====="
 echo "  インストール済みツール:"
 echo "    sudo nano git curl wget htop tmux tree"
-echo "    bash-completion iproute2 dhcpcd openssh GRUB Linux kernel"
+echo "    bash-completion iproute2 dhcpcd openssh iputils GRUB Linux kernel"
 echo ""
 echo "  ネットワーク修正適用済み:"
 echo "    [1] ping有効化: CONFIG_INET/PACKET + sysctl ping_group_range"
@@ -2546,89 +2589,60 @@ echo "    [3] 全NIC自動リンクアップ: udev rules + rcS内 ip link set up
 echo "    [4] NIC名固定: net.ifnames=0 biosdevname=0 は morning.sh のgrub.cfgに追記済み"
 
 # ── /etc/rc.d/init.d/firstboot ───────────────────────────────
-# Docker の overlayfs では setuid ビットが tar.gz 経由で消える場合がある。
-# 初回起動時にここで ping を再ビルドまたは権限を再設定して確実に修正する。
+# 初回起動時のみ実行するセットアップスクリプト。
+# iputils の ping は Step6 chroot 内でビルド済み。
+# tar.gz → USB 展開時に setuid ビットが失われる場合があるため
+# ここで権限の再設定と動作確認のみ行う。ビルドは行わない。
 mkdir -p /etc/rc.d/init.d /etc/rc.d/rc3.d
 cat > /etc/rc.d/init.d/firstboot << 'FIRSTBOOTEOF'
 #!/bin/bash
 # /etc/rc.d/init.d/firstboot
-# 初回起動時のみ実行。ping の setuid / CAP_NET_RAW を確実に設定する。
+# 初回起動時のみ実行。ping 権限の確認・再設定と sysctl 適用を行う。
 
 DONE_FLAG=/etc/firstboot.done
 [ -f "$DONE_FLAG" ] && exit 0
 
 echo "[firstboot] 初回起動セットアップ開始..."
 
-# ── 1. ping の権限を修正 ──────────────────────────────────────
+# ── 1. ping の権限を修正(overlayfs で setuid が消える対策) ───
 fix_ping() {
     local bin="$1"
     [ -x "$bin" ] || return 0
-
-    # CAP_NET_RAW が使えれば setuid 不要(overlayfs でも消えない)
+    # CAP_NET_RAW を優先(setuid より安全)
     if command -v setcap &>/dev/null; then
         setcap cap_net_raw+ep "$bin" 2>/dev/null && {
             echo "[firstboot] setcap cap_net_raw+ep: $bin"
             return 0
         }
     fi
-
     # fallback: setuid root
     chmod 4755 "$bin" 2>/dev/null && \
         echo "[firstboot] chmod 4755 (setuid): $bin"
 }
-
 fix_ping /usr/bin/ping
 fix_ping /usr/bin/ping6
 
-# ── 2. iputils で ping を再ビルド
-SRC=/sources
-
-# printf "${BOLD_GREEN}OK${RESET}\n"
-# printf "${BOLD_RED}FAIL${RESET}\n"
-# printf "${BOLD_YELLOW}WARN${RESET}\n"
-
-# 現在の ping が正常に動くか確認(lo への ping で判定)
-if ping -c1 -W1 127.0.0.1 &>/dev/null; then
-    printf "[firstboot][${BOLD_GREEN}OK${RESET}] ping\n"
-    echo "[firstboot][Skip] iputils build"
-else
-    printf "[firstboot][${BOLD_YELLOW}FAIL${RESET}] ping: iputils で再ビルド\n"
-    echo "[firstboot] iputils : rebuilding..."
-    source /root/.bashrc 2>/dev/null
-    build iputils \
-        -Dbuildtype=release \
-        -DINSTALL_SYSTEMD_UNITS=false \
-        -DUSE_IDN=false \
-        ${CLI_URL_IPUTILS:-https://github.com/iputils/iputils/archive/refs/tags/20240905.tar.gz} \
-        > /tmp/firstboot-iputils-build.log 2>&1 \
-        && echo "[firstboot][build] iputils : completed" \
-        || { printf "[firstboot][${BOLD_RED}FAIL${RESET}] iputils\n"; echo "[firstboot] log : /tmp/firstboot-iputils-build.log";}
-    # 再ビルド後に権限を設定
-    fix_ping /usr/bin/ping
-    fix_ping /usr/bin/ping6
-fi
-
-# ── 3. sysctl: ping_group_range を確実に適用 ─────────────────
-# rcS では /proc がマウント直後で失敗することがあるためここで再適用
-echo "[firstboot] sysctl ping_group_range を適用..."
+# ── 2. sysctl: ping_group_range を確実に適用 ─────────────────
+# rcS では /proc がマウント直後で設定が失敗する場合があるため再適用
 sysctl -w net.ipv4.ping_group_range="0 2147483647" 2>/dev/null && \
     echo "[firstboot] ping_group_range 設定完了" || \
-    echo "[firstboot][WARN] sysctl 失敗(iputils-ping は影響なし)"
-
-# sysctl.d の設定ファイルも適用(再起動後も有効にするため)
+    echo "[firstboot][WARN] sysctl 失敗"
 sysctl -p /etc/sysctl.d/10-network.conf 2>/dev/null || true
 
-# ── 4. 動作確認 ──────────────────────────────────────────────
-echo "[firstboot][RUN] ping"
+# ── 3. 動作確認 ──────────────────────────────────────────────
 if ping -c1 -W2 127.0.0.1 &>/dev/null; then
     echo "[firstboot] ping 127.0.0.1 → OK"
 else
     echo "[firstboot][FAIL] ping 127.0.0.1"
+    echo "  ping が動作しない場合は /usr/bin/ping の存在・権限を確認してください:"
+    echo "    ls -la /usr/bin/ping"
+    echo "    getcap /usr/bin/ping"
 fi
 
 # ── 完了フラグ ────────────────────────────────────────────────
 touch "$DONE_FLAG"
 echo "[firstboot] 完了。次回起動からこのスクリプトはスキップされます。"
+echo "[ OK ] Setup Completed"
 FIRSTBOOTEOF
 
 chmod +x /etc/rc.d/init.d/firstboot
