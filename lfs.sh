@@ -1912,6 +1912,8 @@ do_cmake() {
         --no-system-jsoncpp         \
         --no-system-cppdap          \
         --no-system-librhash        \
+        --no-system-libuv           \
+        --no-system-libarchive      \
         --docdir=/share/doc/cmake-3.31.6
     make -j"$(nproc)" && make install
     echo "[CLI] cmake インストール完了: $(cmake --version | head -1)"
@@ -1927,6 +1929,7 @@ fi
 # meson ビルドで IDN / systemd 依存を無効化してスリムに構成。
 do_iputils() {
     mkdir -p build && cd build
+    PYTHONPATH=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo /usr/lib/python3/dist-packages) \
     meson setup ..                              \
         --prefix=/usr                           \
         --buildtype=release                     \
