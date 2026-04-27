@@ -1912,7 +1912,9 @@ do_iputils() {
         -D USE_GETTEXT=false                    \
         -D INSTALL_SYSTEMD_UNITS=false          \
         -D INSTALL_SYSVINIT_UNITS=false         \
-        -D NINFOD=false
+        -D NINFOD=false                         \
+        -D BUILD_HTML_MANS=false                \
+        -D BUILD_MANS=false
     ninja && ninja install
 
     # setuid ビットは tar.gz 展開後に消える場合がある(overlayfs の制限)
