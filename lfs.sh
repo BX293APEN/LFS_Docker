@@ -67,6 +67,7 @@ _load_pkg_override "kbd-2.6.4.tar.xz"             "CLI_URL_KBD"
 _load_pkg_override "which-2.21.tar.gz"             "CLI_URL_WHICH"
 _load_pkg_override "wget-1.25.0.tar.gz"            "CLI_URL_WGET"
 _load_pkg_override "iputils-20240905.tar.gz"       "CLI_URL_IPUTILS"
+_load_pkg_override "cmake-3.31.6.tar.gz"           "CLI_URL_CMAKE"
 
 DL_RETRIES="${DL_RETRIES:-3}"
 DL_TIMEOUT="${DL_TIMEOUT:-90}"
@@ -1614,6 +1615,10 @@ if ! flagged step5_cli_sources; then
     read -ra _URL_IPUTILS <<< "${CLI_URL_IPUTILS:-https://github.com/iputils/iputils/releases/download/20240905/iputils-20240905.tar.gz https://github.com/iputils/iputils/archive/refs/tags/20240905.tar.gz}"
     _cli_pkg "iputils-20240905.tar.gz" "${_URL_IPUTILS[@]}"
 
+    # cmake: CMakeLists.txt ベースのパッケージビルドに必要
+    read -ra _URL_CMAKE <<< "${CLI_URL_CMAKE:-https://cmake.org/files/v3.31/cmake-3.31.6.tar.gz https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6.tar.gz}"
+    _cli_pkg "cmake-3.31.6.tar.gz" "${_URL_CMAKE[@]}"
+
     done_flag step5_cli_sources
     log_info "Step5 完了"
 else
@@ -1895,6 +1900,27 @@ do_wget() {
     make && make install
 }
 build "wget" "wget-1.25.0.tar.gz" do_wget
+
+# ── cmake ──────────────────────────────────────────────────────
+# CMakeLists.txt ベースのパッケージビルドに必要。
+# --no-system-* でバンドル版を使い追加依存なしでビルド。
+do_cmake() {
+    sed -i '/"lib64"/s/64//' Modules/GNUInstallDirs.cmake
+    ./bootstrap --prefix=/usr       \
+        --system-libs               \
+        --mandir=/share/man         \
+        --no-system-jsoncpp         \
+        --no-system-cppdap          \
+        --no-system-librhash        \
+        --docdir=/share/doc/cmake-3.31.6
+    make -j"$(nproc)" && make install
+    echo "[CLI] cmake インストール完了: $(cmake --version | head -1)"
+}
+if [[ -f "${SRC}/cmake-3.31.6.tar.gz" ]]; then
+    build "cmake" "cmake-3.31.6.tar.gz" do_cmake
+else
+    echo "[WARN] cmake-3.31.6.tar.gz が見つかりません。CMakeLists.txt ベースのパッケージはビルドできません。"
+fi
 
 # ── iputils (ping / ping6 / arping / clockdiff) ────────────────
 # LFS base には ping が含まれないため iputils でビルドする。
@@ -2353,11 +2379,14 @@ build() {
             echo "[ERROR] configure 失敗" >&2; return 1
         }
     elif [[ -f CMakeLists.txt ]]; then
-        echo "[BUILD] CMake を使用します"
+        echo "[BUILD] CMake + Ninja を使用します"
         mkdir -p build && cd build
-        cmake -DCMAKE_INSTALL_PREFIX=/usr "${configure_flags[@]}" .. || {
+        cmake -DCMAKE_INSTALL_PREFIX=/usr -GNinja "${configure_flags[@]}" .. || {
             echo "[ERROR] cmake 失敗" >&2; return 1
         }
+        ninja && ninja install
+        echo "[BUILD] ${pkg} インストール完了"
+        return 0
     elif [[ -f meson.build ]]; then
         echo "[BUILD] Meson を使用します"
         mkdir -p build
