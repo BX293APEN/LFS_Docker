@@ -72,6 +72,7 @@ services:
       - CLI_URL_WHICH=${CLI_URL_WHICH}
       - CLI_URL_WGET=${CLI_URL_WGET}
       - CLI_URL_NEOFETCH=${CLI_URL_NEOFETCH}
+      - CLI_URL_CMAKE=${CLI_URL_CMAKE}
 
     command:
       - /${ENTRY_DIR}/${ENTRY_POINT}
