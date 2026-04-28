@@ -1652,7 +1652,7 @@ build() {
     local dir; dir=$(tar -tf "${tarball}" 2>/dev/null | head -1 | cut -d/ -f1 || true)
     tar -xf "${tarball}"
     cd "${dir}"
-    ${fn} || echo "[WARN] ${name} でエラーが発生しましたが続行します"
+    ${fn} || { echo "[WARN] ${name} でエラーが発生しましたが続行します"; cd "${SRC}"; rm -rf "${dir}"; return 0; }
     cd "${SRC}"
     rm -rf "${dir}"
 }
@@ -1949,7 +1949,6 @@ do_iputils() {
     PYTHONPATH=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo /usr/lib/python3/dist-packages) \
     meson setup ..                              \
         --prefix=/usr                           \
-        --sbindir=bin                           \
         --buildtype=release                     \
         -D BUILD_PING=true                      \
         -D BUILD_ARPING=true                    \
@@ -1963,13 +1962,22 @@ do_iputils() {
         -D BUILD_HTML_MANS=false                \
         -D BUILD_MANS=false                     \
         -D SKIP_TESTS=true                      \
-        || { echo "[ERROR] meson setup 失敗"; return 1; }
+        || { echo "[iputils] ERROR: meson setup 失敗"; return 1; }
 
     echo "[iputils] ninja ビルド開始"
-    ninja || { echo "[ERROR] ninja ビルド失敗"; return 1; }
+    ninja || { echo "[iputils] ERROR: ninja ビルド失敗"; return 1; }
 
     echo "[iputils] ninja install 開始"
-    ninja install || { echo "[ERROR] ninja install 失敗"; return 1; }
+    ninja install || { echo "[iputils] ERROR: ninja install 失敗"; return 1; }
+
+    # iputils はデフォルトで /usr/sbin に install する。
+    # /usr/bin/ping としてもアクセスできるようシンボリックリンクを張る。
+    for bin in ping ping6 arping clockdiff; do
+        if [[ -f /usr/sbin/$bin ]] && [[ ! -e /usr/bin/$bin ]]; then
+            ln -sf /usr/sbin/$bin /usr/bin/$bin
+            echo "[iputils] symlink: /usr/bin/$bin -> /usr/sbin/$bin"
+        fi
+    done
 
     echo "[iputils] インストール先確認:"
     find /usr /bin /sbin -name "ping" -o -name "ping6" -o -name "arping" 2>/dev/null | xargs ls -la 2>/dev/null || echo "  ping系バイナリが見つかりません"
@@ -1980,7 +1988,7 @@ do_iputils() {
     local ping_bin
     ping_bin=$(command -v ping 2>/dev/null || ls /usr/bin/ping /usr/sbin/ping 2>/dev/null | head -1)
     if [[ -z "$ping_bin" ]]; then
-        echo "[ERROR] ping バイナリが見つかりません。ninja install の出力を確認してください。"
+        echo "[iputils] ERROR: ping バイナリが見つかりません"
         return 1
     fi
     echo "[iputils] ping バイナリ: $ping_bin"
@@ -1988,11 +1996,11 @@ do_iputils() {
         if setcap cap_net_raw+ep "$ping_bin" 2>/dev/null; then
             echo "[CLI] ping capability: $(getcap "$ping_bin" 2>/dev/null)"
         else
-            echo "[WARN] setcap 失敗 → chmod 4755 (setuid) にフォールバック"
+            echo "[iputils] WARN: setcap 失敗 → chmod 4755 にフォールバック"
             chmod 4755 "$ping_bin"
         fi
     else
-        echo "[WARN] setcap が見つかりません。setuid にフォールバックします。"
+        echo "[iputils] WARN: setcap なし → chmod 4755 にフォールバック"
         chmod 4755 "$ping_bin"
     fi
     echo "[CLI] iputils インストール完了: $($ping_bin --version 2>&1 | head -1)"
