@@ -1657,6 +1657,21 @@ build() {
     rm -rf "${dir}"
 }
 
+# ── Libcap (setcap コマンド提供 → iputils の CAP_NET_RAW 設定に必須) ────
+# LFS base の libcap は /usr/lib に共有ライブラリのみ。
+# setcap/getcap バイナリが /usr/sbin に入っているか確認し、
+# なければここで再ビルドして確実に配置する。
+do_libcap_cli() {
+    if command -v setcap &>/dev/null; then
+        echo "[CLI] setcap は既に存在します: $(command -v setcap)"
+        return 0
+    fi
+    sed -i '/install -m.*STA/d' libcap/Makefile
+    make prefix=/usr lib=lib && make prefix=/usr lib=lib install
+    echo "[CLI] libcap インストール完了: $(setcap --version 2>&1 | head -1 || echo 'version不明')"
+}
+build "libcap" "$(ls ${SRC}/libcap-*.tar.* 2>/dev/null | head -1 | xargs basename 2>/dev/null)" do_libcap_cli
+
 # ── D-Bus ────────────────────────────────────────────────────
 do_dbus() {
     # LFS公式 (r13.0-systemd) の手順に準拠
@@ -1951,7 +1966,10 @@ do_iputils() {
     if command -v setcap &>/dev/null; then
         setcap cap_net_raw+ep /usr/bin/ping  2>/dev/null || chmod 4755 /usr/bin/ping
         setcap cap_net_raw+ep /usr/bin/ping6 2>/dev/null || chmod 4755 /usr/bin/ping6 2>/dev/null || true
+        echo "[CLI] ping capability: $(getcap /usr/bin/ping 2>/dev/null || echo 'setuid mode')"
     else
+        echo "[WARN] setcap が見つかりません。setuid にフォールバックします。"
+        echo "       libcap が正しくビルドされているか確認: ls -la /usr/lib/libcap*"
         chmod 4755 /usr/bin/ping
         chmod 4755 /usr/bin/ping6 2>/dev/null || true
     fi
@@ -2297,36 +2315,40 @@ alias addcmd='nano /root/.bashrc'
 
 # ── パッケージビルド関数 ──────────────────────────────────────
 # 使い方:
-#   build <パッケージ名> [./configure のフラグ...] [ミラーURL]
+#   build <パッケージ名> [do_関数名] [./configure のフラグ...] [ミラーURL]
 #
 # 例:
 #   build nano
 #   build nano --enable-utf8 --disable-nls
 #   build nano --enable-utf8 https://example.com/nano-8.3.tar.xz
+#   build iputils do_iputils          ← カスタムビルド関数を渡す場合
 #
 # 動作:
 #   1. /sources/<pkg>*.tar.* を探してそのまま展開(既存)
 #   2. 見つからない場合、ミラーURL 引数があればそこから wget で取得
-#   3. configure フラグを付けて ./configure → make → make install
+#   3. do_関数が指定されていればそれを呼ぶ。なければ
+#      configure フラグを付けて ./configure → make → make install
 build() {
     local pkg="$1"; shift
     if [[ -z "$pkg" ]]; then
-        echo "使い方: build <パッケージ名> [configureフラグ...] [ミラーURL]" >&2
+        echo "使い方: build <パッケージ名> [do_関数名] [configureフラグ...] [ミラーURL]" >&2
         return 1
     fi
 
     local SRC=/sources
     local configure_flags=()
     local mirror_url=""
+    local build_fn=""
 
     local extra_cflags=""
     local jobs="$(nproc)"
 
     # 引数を解析:
-    #   CFLAGS=...  → コンパイルフラグ上書き
-    #   JOBS=N      → make の並列数指定
-    #   URL         → ミラー
-    #   それ以外    → configure フラグ
+    #   do_* / 宣言済み関数名 → カスタムビルドコールバック
+    #   CFLAGS=...            → コンパイルフラグ上書き
+    #   JOBS=N                → make の並列数指定
+    #   URL                   → ミラー
+    #   それ以外              → configure フラグ
     for arg in "$@"; do
         if [[ "$arg" == CFLAGS=* ]]; then
             extra_cflags="${arg#CFLAGS=}"
@@ -2334,6 +2356,9 @@ build() {
             jobs="${arg#JOBS=}"
         elif [[ "$arg" == http://* || "$arg" == https://* || "$arg" == ftp://* ]]; then
             mirror_url="$arg"
+        elif declare -f "$arg" &>/dev/null; then
+            # シェル関数として宣言済みの名前 → コールバックとして登録
+            build_fn="$arg"
         else
             configure_flags+=("$arg")
         fi
@@ -2374,6 +2399,18 @@ build() {
     if [[ -n "$extra_cflags" ]]; then
         export CFLAGS="$extra_cflags" CXXFLAGS="$extra_cflags"
         echo "[BUILD] CFLAGS: $extra_cflags"
+    fi
+
+    # カスタムビルド関数が指定されていればそちらに委譲
+    if [[ -n "$build_fn" ]]; then
+        echo "[BUILD] カスタムビルド関数: ${build_fn}"
+        "$build_fn" || {
+            unset CFLAGS CXXFLAGS
+            echo "[ERROR] ${build_fn} 失敗" >&2; return 1
+        }
+        unset CFLAGS CXXFLAGS
+        echo "[BUILD] ${pkg} インストール完了"
+        return 0
     fi
 
     if [[ -f configure ]]; then
