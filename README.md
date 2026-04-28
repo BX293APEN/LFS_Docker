@@ -142,6 +142,8 @@ sudo bash morning.sh
 | 内蔵ディスクなし | `sda`（`sda2` がルート） |
 | 内蔵ディスクあり | `sdb`（`sdb2` がルート） |
 
+`morning.sh` の先頭にある `BOOT_DEVICE` 変数を書き換えて再実行するだけで対応できます：
+
 ```bash
 # morning.sh の先頭
 BOOT_DEVICE=sda   # ← 起動しない場合は sdb に変更
@@ -384,11 +386,15 @@ https://ftp.lfs-matrix.net/pub/lfs/lfs-packages/12.2 # lfs-matrix
 ### USB から起動できない（カーネルパニック: root= is invalid）
 
 ターゲット PC の内蔵ディスクの有無によって USB のデバイス名が変わります。
-`morning.sh` 先頭の `BOOT_DEVICE` 変数を変更して再実行してください。
+`morning.sh` の先頭にある `BOOT_DEVICE` 変数を書き換えて再実行するだけで対応できます。
 
 ```bash
 # 内蔵ディスクがある PC の場合
 BOOT_DEVICE=sdb
+```
+
+```bash
+sudo bash morning.sh
 ```
 
 ### ネットワークに繋がらない（起動後）
