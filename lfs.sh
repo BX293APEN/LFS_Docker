@@ -1944,9 +1944,12 @@ fi
 # meson ビルドで IDN / systemd 依存を無効化してスリムに構成。
 do_iputils() {
     mkdir -p build && cd build
+
+    echo "[iputils] meson setup 開始"
     PYTHONPATH=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || echo /usr/lib/python3/dist-packages) \
     meson setup ..                              \
         --prefix=/usr                           \
+        --sbindir=bin                           \
         --buildtype=release                     \
         -D BUILD_PING=true                      \
         -D BUILD_ARPING=true                    \
@@ -1959,28 +1962,40 @@ do_iputils() {
         -D NINFOD=false                         \
         -D BUILD_HTML_MANS=false                \
         -D BUILD_MANS=false                     \
-        -D SKIP_TESTS=true
-    ninja && ninja install
+        -D SKIP_TESTS=true                      \
+        || { echo "[ERROR] meson setup 失敗"; return 1; }
+
+    echo "[iputils] ninja ビルド開始"
+    ninja || { echo "[ERROR] ninja ビルド失敗"; return 1; }
+
+    echo "[iputils] ninja install 開始"
+    ninja install || { echo "[ERROR] ninja install 失敗"; return 1; }
+
+    echo "[iputils] インストール先確認:"
+    find /usr /bin /sbin -name "ping" -o -name "ping6" -o -name "arping" 2>/dev/null | xargs ls -la 2>/dev/null || echo "  ping系バイナリが見つかりません"
 
     # setuid ビットは tar.gz 展開後に消える場合がある(overlayfs の制限)
     # CAP_NET_RAW を優先、失敗したら setuid にフォールバック
+    # --sbindir=bin でも念のため /usr/sbin も確認
+    local ping_bin
+    ping_bin=$(command -v ping 2>/dev/null || ls /usr/bin/ping /usr/sbin/ping 2>/dev/null | head -1)
+    if [[ -z "$ping_bin" ]]; then
+        echo "[ERROR] ping バイナリが見つかりません。ninja install の出力を確認してください。"
+        return 1
+    fi
+    echo "[iputils] ping バイナリ: $ping_bin"
     if command -v setcap &>/dev/null; then
-        if setcap cap_net_raw+ep /usr/bin/ping 2>/dev/null; then
-            echo "[CLI] ping capability: $(getcap /usr/bin/ping 2>/dev/null)"
+        if setcap cap_net_raw+ep "$ping_bin" 2>/dev/null; then
+            echo "[CLI] ping capability: $(getcap "$ping_bin" 2>/dev/null)"
         else
             echo "[WARN] setcap 失敗 → chmod 4755 (setuid) にフォールバック"
-            chmod 4755 /usr/bin/ping
+            chmod 4755 "$ping_bin"
         fi
-        setcap cap_net_raw+ep /usr/bin/ping6 2>/dev/null || chmod 4755 /usr/bin/ping6 2>/dev/null || true
     else
         echo "[WARN] setcap が見つかりません。setuid にフォールバックします。"
-        echo "       libcap が正しくビルドされているか確認: ls -la /usr/lib/libcap*"
-        chmod 4755 /usr/bin/ping
-        chmod 4755 /usr/bin/ping6 2>/dev/null || true
+        chmod 4755 "$ping_bin"
     fi
-    # PATH を明示して確認（chroot内でPATHが狭い場合の対策）
-    echo "[CLI] iputils インストール完了: $(/usr/bin/ping --version 2>&1 | head -1)"
-    echo "[CLI] ping バイナリ: $(ls -la /usr/bin/ping 2>/dev/null || echo '見つかりません')"
+    echo "[CLI] iputils インストール完了: $($ping_bin --version 2>&1 | head -1)"
 }
 # 取得に失敗している場合はスキップ(firstboot でのリトライ案内が出る)
 if [[ -f "${SRC}/iputils-20240905.tar.gz" ]]; then
