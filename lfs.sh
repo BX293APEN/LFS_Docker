@@ -1958,22 +1958,29 @@ do_iputils() {
         -D INSTALL_SYSVINIT_UNITS=false         \
         -D NINFOD=false                         \
         -D BUILD_HTML_MANS=false                \
-        -D BUILD_MANS=false
+        -D BUILD_MANS=false                     \
+        -D SKIP_TESTS=true
     ninja && ninja install
 
     # setuid ビットは tar.gz 展開後に消える場合がある(overlayfs の制限)
     # CAP_NET_RAW を優先、失敗したら setuid にフォールバック
     if command -v setcap &>/dev/null; then
-        setcap cap_net_raw+ep /usr/bin/ping  2>/dev/null || chmod 4755 /usr/bin/ping
+        if setcap cap_net_raw+ep /usr/bin/ping 2>/dev/null; then
+            echo "[CLI] ping capability: $(getcap /usr/bin/ping 2>/dev/null)"
+        else
+            echo "[WARN] setcap 失敗 → chmod 4755 (setuid) にフォールバック"
+            chmod 4755 /usr/bin/ping
+        fi
         setcap cap_net_raw+ep /usr/bin/ping6 2>/dev/null || chmod 4755 /usr/bin/ping6 2>/dev/null || true
-        echo "[CLI] ping capability: $(getcap /usr/bin/ping 2>/dev/null || echo 'setuid mode')"
     else
         echo "[WARN] setcap が見つかりません。setuid にフォールバックします。"
         echo "       libcap が正しくビルドされているか確認: ls -la /usr/lib/libcap*"
         chmod 4755 /usr/bin/ping
         chmod 4755 /usr/bin/ping6 2>/dev/null || true
     fi
-    echo "[CLI] iputils インストール完了: $(ping --version 2>&1 | head -1)"
+    # PATH を明示して確認（chroot内でPATHが狭い場合の対策）
+    echo "[CLI] iputils インストール完了: $(/usr/bin/ping --version 2>&1 | head -1)"
+    echo "[CLI] ping バイナリ: $(ls -la /usr/bin/ping 2>/dev/null || echo '見つかりません')"
 }
 # 取得に失敗している場合はスキップ(firstboot でのリトライ案内が出る)
 if [[ -f "${SRC}/iputils-20240905.tar.gz" ]]; then
