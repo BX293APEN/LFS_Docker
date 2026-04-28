@@ -2005,7 +2005,7 @@ do_iputils() {
         echo "[iputils] WARN: setcap なし → chmod 4755 にフォールバック"
         chmod 4755 "$ping_bin"
     fi
-    echo "[CLI] iputils インストール完了: $($ping_bin --version 2>&1 | head -1)"
+    echo "[CLI] iputils インストール完了: $($ping_bin -V 2>&1 | head -1)"
 }
 # 取得に失敗している場合はスキップ(firstboot でのリトライ案内が出る)
 if [[ -f "${SRC}/iputils-20240905.tar.gz" ]]; then
