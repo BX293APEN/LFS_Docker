@@ -1962,7 +1962,11 @@ do_iputils() {
         -D BUILD_HTML_MANS=false                \
         -D BUILD_MANS=false                     \
         -D SKIP_TESTS=true                      \
-        || { echo "[iputils] ERROR: meson setup 失敗"; return 1; }
+        || {
+            echo "[iputils] ERROR: meson setup 失敗 --- meson-log.txt ---"
+            tail -40 meson-logs/meson-log.txt 2>/dev/null | while IFS= read -r line; do echo "[iputils] $line"; done
+            return 1
+        }
 
     echo "[iputils] ninja ビルド開始"
     ninja || { echo "[iputils] ERROR: ninja ビルド失敗"; return 1; }
